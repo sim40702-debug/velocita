@@ -7,6 +7,8 @@ import shutil
 import time
 import math
 import threading
+import multiprocessing as mp
+import tempfile
 import tkinter as tk
 from tkinter import filedialog, messagebox
 
@@ -205,6 +207,107 @@ class SpeedDisplayProcessor:
 
 
 # ==========================================
+# GESTIONE AUTOMATICA DEI CORE CPU
+# ==========================================
+
+# Numero totale di core/thread rilevati sul PC.
+CPU_TOTALI = os.cpu_count() or 4
+
+# Percentuale di core usata da ciascuna opzione della GUI "CPU Workers".
+# AUTO corrisponde al 50%: un buon compromesso, lascia sempre metà dei
+# core liberi per il resto del sistema (GUI, altri programmi) invece di
+# saturare tutta la macchina.
+PERCENTUALI_CPU_WORKERS = {
+    "AUTO": 0.50,
+    "25%": 0.25,
+    "50%": 0.50,
+    "75%": 0.75,
+    "100%": 1.00,
+}
+
+# Tetto massimo assoluto di processi, indipendentemente dalla percentuale
+# scelta. Anche su macchine con moltissimi core/thread non conviene andare
+# oltre: troppi processi in parallelo su un video 4K60 significano troppi
+# file temporanei aperti insieme e troppa contesa sul disco. È anche il
+# punto in cui, se in futuro si aggiungesse elaborazione via GPU (CUDA),
+# andrebbe applicato un limite analogo per non saturare la VRAM (es. 8 GB):
+# ogni processo GPU tiene occupata della memoria video, quindi il numero
+# di processi concorrenti va tenuto basso indipendentemente dai core CPU.
+MAX_WORKER_ASSOLUTO = 16
+
+# Non ha senso creare un processo per pochi fotogrammi (l'avvio di un
+# processo ha un costo): ogni "pezzo" di video assegnato a un processo
+# deve avere almeno questi frame.
+FRAME_MINIMI_PER_PROCESSO = 40
+
+
+def calcola_numero_worker(percentuale, cpu_totali=CPU_TOTALI):
+    """
+    Traduce una percentuale (es. 0.5 = 50%) nel numero di processi worker
+    da usare, arrotondando in modo "classico" (0.5 sempre per eccesso, non
+    l'arrotondamento bancario di Python), garantendo sempre almeno 1
+    worker e senza mai superare i core reali disponibili né il tetto di
+    sicurezza MAX_WORKER_ASSOLUTO.
+    Esempio: 12 core disponibili, percentuale 0.5 -> 6 worker.
+    """
+    grezzo = cpu_totali * percentuale
+    worker = int(grezzo + 0.5)
+    worker = max(1, worker)
+    worker = min(worker, cpu_totali)
+    worker = min(worker, MAX_WORKER_ASSOLUTO)
+    return worker
+
+
+# ==========================================
+# ELABORAZIONE PARALLELA (worker multiprocesso)
+# ==========================================
+
+# Frame di "riscaldamento" letti prima dell'inizio ufficiale di ogni pezzo:
+# servono solo a far individuare il display al rilevatore (che tiene
+# memoria degli ultimi frame) prima di iniziare davvero a scrivere, così
+# anche il primo frame scritto da ogni pezzo è già coperto correttamente.
+FRAME_RISCALDAMENTO = 6
+
+
+def _elabora_segmento(video_path, start_frame, num_frame, debug, out_path,
+                       fps, frame_w, frame_h, contatore_progresso):
+    """
+    Funzione eseguita in un processo separato: apre il video, si posiziona
+    all'inizio del proprio pezzo, elabora num_frame fotogrammi e li scrive
+    in un file video temporaneo tutto suo. Deve stare a livello di modulo
+    (non essere un metodo di classe GUI) per poter essere eseguita da
+    multiprocessing su tutte le piattaforme.
+    """
+    processor = SpeedDisplayProcessor(debug=debug)
+
+    cap = cv2.VideoCapture(video_path)
+    inizio_lettura = max(0, start_frame - FRAME_RISCALDAMENTO)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, inizio_lettura)
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(out_path, fourcc, fps, (frame_w, frame_h))
+
+    frame_idx = inizio_lettura
+    scritti = 0
+    while scritti < num_frame:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        processed = processor.process_frame(frame)
+
+        if frame_idx >= start_frame:
+            out.write(processed)
+            scritti += 1
+            contatore_progresso.value = scritti
+
+        frame_idx += 1
+
+    cap.release()
+    out.release()
+
+
+# ==========================================
 # SPINNER "LIQUID GLASS" (canvas, rotazione fluida)
 # ==========================================
 
@@ -301,9 +404,12 @@ class ModernSpeedometerApp:
         self.root.protocol("WM_DELETE_WINDOW", self._esci)
 
     def _build_gui(self):
+        # variabile condivisa dalle due UI per la scelta "CPU Workers"
         if USE_CTK:
+            self.opzione_cpu_var = ctk.StringVar(value="AUTO")
             self._build_customtkinter_ui()
         else:
+            self.opzione_cpu_var = tk.StringVar(value="AUTO")
             self._build_standard_ui()
 
     def _build_customtkinter_ui(self):
@@ -329,6 +435,19 @@ class ModernSpeedometerApp:
 
         self.switch_debug = ctk.CTkSwitch(params_frame, text="Debug Visivo (verde=zona rilevata, rosso=zona sfuocata, nessun effetto reale)")
         self.switch_debug.grid(row=0, column=0, padx=15, pady=10, sticky="w")
+
+        cpu_row = ctk.CTkFrame(params_frame, fg_color="transparent")
+        cpu_row.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="w")
+
+        ctk.CTkLabel(cpu_row, text="CPU Workers:").pack(side="left", padx=(0, 8))
+        ctk.CTkOptionMenu(
+            cpu_row, variable=self.opzione_cpu_var,
+            values=list(PERCENTUALI_CPU_WORKERS.keys()), width=110
+        ).pack(side="left")
+        ctk.CTkLabel(
+            cpu_row, text=f"(CPU disponibili: {CPU_TOTALI})",
+            font=ctk.CTkFont(size=11), text_color="gray"
+        ).pack(side="left", padx=(10, 0))
 
         progress_frame = ctk.CTkFrame(self.root, corner_radius=10)
         progress_frame.grid(row=3, column=0, padx=15, pady=10, sticky="ew")
@@ -393,6 +512,15 @@ class ModernSpeedometerApp:
 
         self.debug_var = tk.BooleanVar(value=False)
         tk.Checkbutton(f_opts, text="Debug Visivo (verde=zona rilevata, rosso=zona sfuocata, nessun effetto reale)", variable=self.debug_var).pack(anchor="w", padx=10, pady=5)
+
+        cpu_row = tk.Frame(f_opts)
+        cpu_row.pack(anchor="w", padx=10, pady=(0, 5), fill=tk.X)
+        tk.Label(cpu_row, text="CPU Workers:").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Combobox(
+            cpu_row, textvariable=self.opzione_cpu_var,
+            values=list(PERCENTUALI_CPU_WORKERS.keys()), state="readonly", width=8
+        ).pack(side=tk.LEFT)
+        tk.Label(cpu_row, text=f"(CPU disponibili: {CPU_TOTALI})", fg="gray").pack(side=tk.LEFT, padx=(10, 0))
 
         f_prog = tk.Frame(frame)
         f_prog.pack(fill=tk.X, pady=10)
@@ -532,8 +660,6 @@ class ModernSpeedometerApp:
             filename = os.path.basename(in_file)
             name, ext = os.path.splitext(filename)
 
-            processor = SpeedDisplayProcessor(debug=debug)
-
             self.log(f"[+] Elaborazione file: {filename} [Debug: {debug}]")
             cap = cv2.VideoCapture(in_file)
             if not cap.isOpened():
@@ -543,50 +669,35 @@ class ModernSpeedometerApp:
             fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
             frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
 
             temp_out = os.path.join(out_dir, f"temp_{name}.mp4")
             final_out = os.path.join(out_dir, f"{name}_speed_blur.mp4")
 
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(temp_out, fourcc, fps, (frame_w, frame_h))
+            ffmpeg_bin = shutil.which("ffmpeg")
 
-            count = 0
-            interrotto = False
-            start_time = time.time()
+            opzione_scelta = self.opzione_cpu_var.get()
+            percentuale = PERCENTUALI_CPU_WORKERS.get(opzione_scelta, 0.50)
+            worker_richiesti = calcola_numero_worker(percentuale)
+            # non creare più worker di quanti ne servano davvero per la
+            # lunghezza del video (niente processi per pochi fotogrammi)
+            n_worker = min(worker_richiesti, max(1, total_frames // FRAME_MINIMI_PER_PROCESSO))
 
-            while cap.isOpened():
-                if self._stop_event.is_set():
-                    interrotto = True
-                    self.log("[!] Elaborazione interrotta dall'utente.")
-                    break
+            self.log(f"[+] CPU disponibili: {CPU_TOTALI} — Worker utilizzati: {n_worker} "
+                      f"(impostazione: {opzione_scelta})")
 
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                processed_frame = processor.process_frame(frame)
-                out.write(processed_frame)
-
-                count += 1
-                if total_frames > 0:
-                    pct = count / total_frames
-                    elapsed = time.time() - start_time
-
-                    frames_left = total_frames - count
-                    if count > 5 and elapsed > 0:
-                        fps_proc = count / elapsed
-                        eta_seconds = frames_left / fps_proc if fps_proc > 0 else 0
-                        eta_str = time.strftime('%M:%S', time.gmtime(eta_seconds))
-                    else:
-                        eta_str = "Calcolo..."
-
-                    details_text = f"Mancanti: {frames_left} frame | Tempo stimato (ETA): {eta_str}"
-                    self.root.after(0, self._update_progress, pct, details_text)
-
-            cap.release()
-            out.release()
+            if ffmpeg_bin and total_frames > 0 and n_worker > 1:
+                interrotto = not self._elabora_parallelo(
+                    in_file, temp_out, total_frames, fps, frame_w, frame_h, debug, n_worker
+                )
+            else:
+                self.log("[+] Elaborazione sequenziale (video corto o ffmpeg non trovato)...")
+                interrotto = not self._elabora_sequenziale(
+                    in_file, temp_out, total_frames, fps, frame_w, frame_h, debug
+                )
 
             if interrotto:
+                self.log("[!] Elaborazione interrotta dall'utente.")
                 if os.path.exists(temp_out):
                     os.remove(temp_out)
                 return
@@ -594,7 +705,6 @@ class ModernSpeedometerApp:
             self.log("[+] Sincronizzazione audio in corso...")
             self.root.after(0, self._update_progress, 1.0, "Sincronizzazione audio in corso...")
 
-            ffmpeg_bin = shutil.which("ffmpeg")
             if ffmpeg_bin:
                 cmd = [
                     ffmpeg_bin, "-y",
@@ -626,6 +736,127 @@ class ModernSpeedometerApp:
             except tk.TclError:
                 pass  # la finestra è già stata chiusa (uscita forzata)
 
+    def _elabora_sequenziale(self, in_file, temp_out, total_frames, fps, frame_w, frame_h, debug):
+        """Percorso "classico", un solo processo. Ritorna False se interrotto dall'utente."""
+        processor = SpeedDisplayProcessor(debug=debug)
+        cap = cv2.VideoCapture(in_file)
+
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(temp_out, fourcc, fps, (frame_w, frame_h))
+
+        count = 0
+        start_time = time.time()
+
+        while cap.isOpened():
+            if self._stop_event.is_set():
+                cap.release()
+                out.release()
+                return False
+
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            processed_frame = processor.process_frame(frame)
+            out.write(processed_frame)
+
+            count += 1
+            if total_frames > 0:
+                pct = count / total_frames
+                elapsed = time.time() - start_time
+                frames_left = total_frames - count
+                if count > 5 and elapsed > 0:
+                    fps_proc = count / elapsed
+                    eta_seconds = frames_left / fps_proc if fps_proc > 0 else 0
+                    eta_str = time.strftime('%M:%S', time.gmtime(eta_seconds))
+                else:
+                    eta_str = "Calcolo..."
+                details_text = f"Mancanti: {frames_left} frame | Tempo stimato (ETA): {eta_str}"
+                self.root.after(0, self._update_progress, pct, details_text)
+
+        cap.release()
+        out.release()
+        return True
+
+    def _elabora_parallelo(self, in_file, temp_out, total_frames, fps, frame_w, frame_h, debug, n_worker):
+        """
+        Divide il video in n_worker pezzi ed elabora ognuno in un processo
+        separato (sfrutta più core della CPU), poi riunisce i pezzi con
+        ffmpeg. Ritorna False se interrotto dall'utente.
+        """
+        base = total_frames // n_worker
+        confini = [base * i for i in range(n_worker)] + [total_frames]
+
+        temp_dir = tempfile.mkdtemp(prefix="speedblur_")
+        segmenti = []
+        processi = []
+        contatori = []  # (Value, num_frame_del_pezzo)
+
+        try:
+            for i in range(n_worker):
+                start = confini[i]
+                fine = confini[i + 1]
+                if start >= fine:
+                    continue
+
+                seg_path = os.path.join(temp_dir, f"seg_{i:03d}.mp4")
+                contatore = mp.Value('i', 0)
+
+                p = mp.Process(
+                    target=_elabora_segmento,
+                    args=(in_file, start, fine - start, debug, seg_path, fps, frame_w, frame_h, contatore)
+                )
+                p.start()
+
+                processi.append(p)
+                segmenti.append(seg_path)
+                contatori.append((contatore, fine - start))
+
+            start_time = time.time()
+            while any(p.is_alive() for p in processi):
+                if self._stop_event.is_set():
+                    for p in processi:
+                        p.terminate()
+                    for p in processi:
+                        p.join()
+                    return False
+
+                fatti = sum(c.value for c, _ in contatori)
+                if total_frames > 0:
+                    pct = fatti / total_frames
+                    elapsed = time.time() - start_time
+                    frames_left = total_frames - fatti
+                    if fatti > 5 and elapsed > 0:
+                        fps_proc = fatti / elapsed
+                        eta_seconds = frames_left / fps_proc if fps_proc > 0 else 0
+                        eta_str = time.strftime('%M:%S', time.gmtime(eta_seconds))
+                    else:
+                        eta_str = "Calcolo..."
+                    details_text = f"Mancanti: {frames_left} frame | Tempo stimato (ETA): {eta_str}"
+                    self.root.after(0, self._update_progress, pct, details_text)
+
+                time.sleep(0.2)
+
+            for p in processi:
+                p.join()
+
+            if self._stop_event.is_set():
+                return False
+
+            # riunisce i pezzi in un unico file, nell'ordine giusto
+            elenco_path = os.path.join(temp_dir, "elenco.txt")
+            with open(elenco_path, "w") as f:
+                for s in segmenti:
+                    f.write(f"file '{s}'\n")
+
+            ffmpeg_bin = shutil.which("ffmpeg")
+            cmd = [ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", elenco_path, "-c", "copy", temp_out]
+            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            return True
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def _update_progress(self, pct, details_text):
         percent_str = f"{int(pct * 100)}%"
         if USE_CTK:
@@ -652,6 +883,8 @@ class ModernSpeedometerApp:
 
 
 if __name__ == "__main__":
+    mp.freeze_support()
+
     if USE_CTK:
         root = ctk.CTk()
     else:
