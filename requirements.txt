@@ -1,4 +1,9 @@
-opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
 numpy>=1.24.0
-Pillow>=9.5.0
-customtkinter>=5.2.0
+tqdm>=4.65.0
+
+# Opzionali (non richiesti dal core):
+# ultralytics>=8.0.0    # solo se si vuole usare un modello YOLO custom in models/
+# torch, torchvision    # richiesti da ultralytics per l'inferenza GPU/CPU
+# pytesseract>=0.3.10   # solo per --min-speed (richiede anche il binario Tesseract OCR nel PATH)
+# customtkinter>=5.2.0  # solo per gui_app.py: dark mode e look moderno; senza, la GUI usa tkinter/ttk puro
