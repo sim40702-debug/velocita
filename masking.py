@@ -19,6 +19,10 @@ def apply_pixelate(frame: np.ndarray, bbox: BBox, padding: int = 10, block_size:
 
     roi = frame[y1:y2, x1:x2]
     roi_h, roi_w = roi.shape[:2]
+    # Con un blocco fisso (es. 12 px) le cifre grandi restavano leggibili,
+    # soprattutto nei video 4K: il lato corto del riquadro viene diviso
+    # sempre in al massimo 6 blocchi (block_size resta il minimo).
+    block_size = max(block_size, min(roi_w, roi_h) // 6)
     small_w = max(1, roi_w // max(1, block_size))
     small_h = max(1, roi_h // max(1, block_size))
     small = cv2.resize(roi, (small_w, small_h), interpolation=cv2.INTER_LINEAR)

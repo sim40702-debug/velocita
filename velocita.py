@@ -64,6 +64,9 @@ PERSISTENZA_FRAME = 6
 # Regola questi valori guardando l'output in modalità DEBUG (riquadro
 # rosso = zona che verrà sfuocata) finché non copre bene il numero.
 
+# Estensioni trattate come foto (tutte le altre vengono aperte come video)
+ESTENSIONI_IMMAGINI = [".jpg", ".jpeg", ".png", ".webp"]
+
 
 # ==========================================
 # RILEVAMENTO DISPLAY + PIXELIZZAZIONE
@@ -578,6 +581,15 @@ class ModernSpeedometerApp:
             self.entry_output.insert(0, folder_path)
 
     def log(self, message):
+        # Il thread di elaborazione non può toccare la GUI direttamente
+        # (tkinter non lo permette e a volte si blocca o va in crash):
+        # chiede alla finestra di scrivere lei il messaggio appena può.
+        try:
+            self.root.after(0, self._scrivi_log, message)
+        except (tk.TclError, RuntimeError):
+            pass  # la finestra è già stata chiusa
+
+    def _scrivi_log(self, message):
         if USE_CTK:
             self.txt_log.insert(ctk.END, message + "\n")
             self.txt_log.see(ctk.END)
@@ -628,8 +640,22 @@ class ModernSpeedometerApp:
         in_p = self.entry_input.get()
         out_p = self.entry_output.get()
 
-        if not os.path.exists(in_p):
+        if not os.path.isfile(in_p):
             messagebox.showerror("Errore", "Selezionare un file di input valido.")
+            return
+
+        # Se la cartella di destinazione è vuota, salva accanto al file di
+        # input (prima finiva nella cartella da cui era partito il programma).
+        if out_p.strip() == "":
+            out_p = os.path.dirname(os.path.abspath(in_p))
+            self.output_dir = out_p
+            self.entry_output.delete(0, tk.END)
+            self.entry_output.insert(0, out_p)
+
+        # Se la cartella non esiste il video non veniva salvato, ma il
+        # programma diceva lo stesso "Completato con successo".
+        if not os.path.isdir(out_p):
+            messagebox.showerror("Errore", "La cartella di destinazione non esiste.")
             return
 
         debug = self.switch_debug.get() == 1 if USE_CTK else self.debug_var.get()
@@ -656,11 +682,21 @@ class ModernSpeedometerApp:
         t.start()
 
     def _process(self, in_file, out_dir, debug):
+        # messaggio mostrato alla fine sotto la barra (cambia se c'è un errore)
+        self._messaggio_finale = "Elaborazione completata."
         try:
             filename = os.path.basename(in_file)
             name, ext = os.path.splitext(filename)
 
             self.log(f"[+] Elaborazione file: {filename} [Debug: {debug}]")
+
+            # Le foto (jpg, png, webp) si possono scegliere nel file picker:
+            # prima venivano trasformate in un video .mp4 di un solo frame,
+            # adesso vengono salvate come foto.
+            if ext.lower() in ESTENSIONI_IMMAGINI:
+                self._elabora_immagine(in_file, out_dir, name, ext, debug)
+                return
+
             cap = cv2.VideoCapture(in_file)
             if not cap.isOpened():
                 raise ValueError("Impossibile aprire il file video.")
@@ -698,9 +734,13 @@ class ModernSpeedometerApp:
 
             if interrotto:
                 self.log("[!] Elaborazione interrotta dall'utente.")
+                self._messaggio_finale = "Elaborazione interrotta."
                 if os.path.exists(temp_out):
                     os.remove(temp_out)
                 return
+
+            if not os.path.exists(temp_out):
+                raise ValueError("Il video elaborato non è stato creato.")
 
             self.log("[+] Sincronizzazione audio in corso...")
             self.root.after(0, self._update_progress, 1.0, "Sincronizzazione audio in corso...")
@@ -716,10 +756,19 @@ class ModernSpeedometerApp:
                     "-map", "1:a:0?",
                     final_out
                 ]
-                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if os.path.exists(temp_out):
+                risultato = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if risultato.returncode == 0 and os.path.exists(final_out):
                     os.remove(temp_out)
+                else:
+                    # Prima, se ffmpeg falliva, il video elaborato veniva
+                    # cancellato lo stesso e si perdeva tutto: ora si tiene
+                    # almeno il video senza audio.
+                    self.log("[!] Audio non aggiunto (errore di ffmpeg): salvo il video senza audio.")
+                    if os.path.exists(final_out):
+                        os.remove(final_out)
+                    os.rename(temp_out, final_out)
             else:
+                self.log("[!] ffmpeg non trovato: il video sarà senza audio.")
                 if os.path.exists(final_out):
                     os.remove(final_out)
                 os.rename(temp_out, final_out)
@@ -729,12 +778,35 @@ class ModernSpeedometerApp:
 
         except Exception as e:
             self.log(f"[ERRORE] {str(e)}")
+            self._messaggio_finale = "Errore: guarda il log qui sotto."
         finally:
             self._elaborazione_in_corso = False
             try:
                 self.root.after(0, self._reset_ui)
-            except tk.TclError:
+            except (tk.TclError, RuntimeError):
                 pass  # la finestra è già stata chiusa (uscita forzata)
+
+    def _elabora_immagine(self, in_file, out_dir, name, ext, debug):
+        """Pixella il display in una singola foto e la salva con lo stesso formato."""
+        # np.fromfile + imdecode invece di cv2.imread: cv2.imread su Windows
+        # non riesce ad aprire file con lettere accentate nel percorso.
+        dati = np.fromfile(in_file, dtype=np.uint8)
+        frame = cv2.imdecode(dati, cv2.IMREAD_COLOR)
+        if frame is None:
+            raise ValueError("Impossibile aprire l'immagine.")
+
+        processor = SpeedDisplayProcessor(debug=debug)
+        risultato = processor.process_frame(frame)
+
+        final_out = os.path.join(out_dir, f"{name}_speed_blur{ext}")
+        ok, codificata = cv2.imencode(ext, risultato)
+        if not ok:
+            raise ValueError("Impossibile salvare l'immagine.")
+        codificata.tofile(final_out)
+
+        self.root.after(0, self._update_progress, 1.0, "Foto elaborata.")
+        self._output_path = final_out
+        self.log(f"[✓] Completato con successo! Salvato in: {final_out}")
 
     def _elabora_sequenziale(self, in_file, temp_out, total_frames, fps, frame_w, frame_h, debug):
         """Percorso "classico", un solo processo. Ritorna False se interrotto dall'utente."""
@@ -743,6 +815,9 @@ class ModernSpeedometerApp:
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(temp_out, fourcc, fps, (frame_w, frame_h))
+        if not out.isOpened():
+            cap.release()
+            raise ValueError("Impossibile creare il video di output (controlla la cartella).")
 
         count = 0
         start_time = time.time()
@@ -843,6 +918,13 @@ class ModernSpeedometerApp:
             if self._stop_event.is_set():
                 return False
 
+            # Se un processo si è chiuso con un errore, il suo pezzo di
+            # video manca o è incompleto: meglio fermarsi che salvare un
+            # video con un buco in mezzo.
+            for i, p in enumerate(processi):
+                if p.exitcode != 0 or not os.path.exists(segmenti[i]):
+                    raise ValueError(f"Il pezzo {i + 1} del video non è stato elaborato.")
+
             # riunisce i pezzi in un unico file, nell'ordine giusto
             elenco_path = os.path.join(temp_dir, "elenco.txt")
             with open(elenco_path, "w") as f:
@@ -851,7 +933,9 @@ class ModernSpeedometerApp:
 
             ffmpeg_bin = shutil.which("ffmpeg")
             cmd = [ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", elenco_path, "-c", "copy", temp_out]
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            risultato = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if risultato.returncode != 0:
+                raise ValueError("ffmpeg non è riuscito a unire i pezzi del video.")
 
             return True
         finally:
@@ -870,14 +954,16 @@ class ModernSpeedometerApp:
 
     def _reset_ui(self):
         self.spinner.ferma()
+        # prima diceva sempre "completata", anche dopo un errore o uno stop
+        messaggio = getattr(self, "_messaggio_finale", "Elaborazione completata.")
         if USE_CTK:
             self.btn_start.configure(state="normal")
-            self.lbl_details.configure(text="Elaborazione completata.")
+            self.lbl_details.configure(text=messaggio)
             if self._output_path:
                 self.lbl_link.configure(text="▶ Apri il video elaborato")
         else:
             self.btn_start.config(state="normal")
-            self.lbl_details.config(text="Elaborazione completata.")
+            self.lbl_details.config(text=messaggio)
             if self._output_path:
                 self.lbl_link.config(text="▶ Apri il video elaborato")
 
