@@ -5,8 +5,8 @@ import numpy as np
 import subprocess
 import shutil
 import time
-import math
 import threading
+import queue
 import multiprocessing as mp
 import tempfile
 import tkinter as tk
@@ -221,7 +221,7 @@ CPU_TOTALI = os.cpu_count() or 4
 # core liberi per il resto del sistema (GUI, altri programmi) invece di
 # saturare tutta la macchina.
 PERCENTUALI_CPU_WORKERS = {
-    "AUTO": 0.50,
+    "Auto": 0.50,
     "25%": 0.25,
     "50%": 0.50,
     "75%": 0.75,
@@ -281,6 +281,11 @@ def _elabora_segmento(video_path, start_frame, num_frame, debug, out_path,
     (non essere un metodo di classe GUI) per poter essere eseguita da
     multiprocessing su tutte le piattaforme.
     """
+    # OpenCV di suo usa tutti i core per ogni operazione: con tanti
+    # processi insieme si rubavano la CPU a vicenda. Ogni processo usa
+    # un core solo, a dividere il lavoro ci pensano i worker.
+    cv2.setNumThreads(1)
+
     processor = SpeedDisplayProcessor(debug=debug)
 
     cap = cv2.VideoCapture(video_path)
@@ -311,80 +316,40 @@ def _elabora_segmento(video_path, start_frame, num_frame, debug, out_path,
 
 
 # ==========================================
-# SPINNER "LIQUID GLASS" (canvas, rotazione fluida)
+# STILE GRAFICO (stile Apple)
 # ==========================================
 
-SPINNER_PUNTI = 16          # quanti punti compongono l'anello
-SPINNER_RAGGIO = 24         # raggio dell'anello (px)
-SPINNER_DOT_R = 3.4         # raggio dei singoli punti (px)
-SPINNER_CANVAS_SIZE = 64
-SPINNER_INTERVALLO_MS = 45  # più basso = rotazione più veloce/fluida
+# Font di sistema: SF Pro su Mac, Segoe UI su Windows
+if sys.platform == "darwin":
+    FONT_SISTEMA = ".AppleSystemUIFont"
+elif sys.platform.startswith("win"):
+    FONT_SISTEMA = "Segoe UI"
+else:
+    FONT_SISTEMA = "Helvetica"
 
-# Palette "liquid glass": blu vetro luminoso che sfuma nel translucido scuro
-SPINNER_COLORE_TESTA = (140, 200, 255)   # blu chiaro brillante (capo scia)
-SPINNER_COLORE_CODA = (45, 58, 74)       # blu-grigio scuro translucido
-SPINNER_SFONDO = "#242424"               # deve avvicinarsi allo sfondo del frame scuro
+# Colori: ogni coppia è (tema chiaro, tema scuro). CustomTkinter sceglie
+# da solo quello giusto in base al tema del Mac/Windows.
+BLU = "#0a84ff"
+BLU_HOVER = "#0071e3"
+COLORE_SFONDO = ("#f2f2f7", "#1e1e1e")
+COLORE_SCHEDA = ("#ffffff", "#2c2c2e")
+COLORE_TESTO = ("#1d1d1f", "#f5f5f7")
+COLORE_GRIGIO = ("#86868b", "#98989d")
+COLORE_PULSANTE = ("#e9e9ed", "#3a3a3c")
+COLORE_PULSANTE_HOVER = ("#dcdce1", "#48484a")
+COLORE_SEPARATORE = ("#e5e5ea", "#3a3a3c")
+COLORE_SELEZIONATO = ("#ffffff", "#636366")
 
 
-def _blend_hex(rgb1, rgb2, t):
-    """Interpola linearmente tra due colori RGB (t da 0 a 1) e restituisce hex."""
-    r = int(rgb1[0] + (rgb2[0] - rgb1[0]) * t)
-    g = int(rgb1[1] + (rgb2[1] - rgb1[1]) * t)
-    b = int(rgb1[2] + (rgb2[2] - rgb1[2]) * t)
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
-class SpinnerLiquidGlass:
-    """Anello di punti che ruota con una scia luminosa, disegnato su un
-    tk.Canvas (funziona sia dentro widget CustomTkinter che tkinter puro)."""
-
-    def __init__(self, parent):
-        self.canvas = tk.Canvas(
-            parent, width=SPINNER_CANVAS_SIZE, height=SPINNER_CANVAS_SIZE,
-            highlightthickness=0, bg=SPINNER_SFONDO
-        )
-        self._dot_ids = []
-        self._head = 0
-        self._job = None
-
-        cx = cy = SPINNER_CANVAS_SIZE / 2
-        for i in range(SPINNER_PUNTI):
-            angolo = 2 * math.pi * i / SPINNER_PUNTI
-            x = cx + SPINNER_RAGGIO * math.cos(angolo)
-            y = cy + SPINNER_RAGGIO * math.sin(angolo)
-            dot = self.canvas.create_oval(
-                x - SPINNER_DOT_R, y - SPINNER_DOT_R,
-                x + SPINNER_DOT_R, y + SPINNER_DOT_R,
-                fill=SPINNER_SFONDO, outline=""
-            )
-            self._dot_ids.append(dot)
-
-    def grid(self, **kwargs):
-        self.canvas.grid(**kwargs)
-
-    def pack(self, **kwargs):
-        self.canvas.pack(**kwargs)
-
-    def _disegna_frame(self):
-        for i, dot in enumerate(self._dot_ids):
-            distanza = (self._head - i) % SPINNER_PUNTI
-            # scia luminosa: più vicino alla "testa", più luminoso
-            t = 1 - (distanza / SPINNER_PUNTI)
-            t = max(0.0, t) ** 1.6  # curva morbida, stile "liquid glass"
-            colore = _blend_hex(SPINNER_COLORE_CODA, SPINNER_COLORE_TESTA, t)
-            self.canvas.itemconfig(dot, fill=colore)
-
-    def avvia(self):
-        self._head = (self._head + 1) % SPINNER_PUNTI
-        self._disegna_frame()
-        self._job = self.canvas.after(SPINNER_INTERVALLO_MS, self.avvia)
-
-    def ferma(self):
-        if self._job is not None:
-            self.canvas.after_cancel(self._job)
-            self._job = None
-        for dot in self._dot_ids:
-            self.canvas.itemconfig(dot, fill=SPINNER_SFONDO)
+def formatta_tempo(secondi):
+    """Trasforma i secondi in testo tipo "1:05" (o "1:02:05" se più di un'ora)."""
+    secondi = int(secondi)
+    ore = secondi // 3600
+    minuti = (secondi % 3600) // 60
+    sec = secondi % 60
+    if ore > 0:
+        return f"{ore}:{minuti:02d}:{sec:02d}"
+    return f"{minuti}:{sec:02d}"
 
 
 # ==========================================
@@ -394,170 +359,244 @@ class SpinnerLiquidGlass:
 class ModernSpeedometerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Auto-Tracker Dashboard Engine (Speed Blur)")
-        self.root.geometry("800x760")
+        self.root.title("Velocità")
 
         self.input_path = ""
         self.output_dir = ""
         self._output_path = ""
         self._elaborazione_in_corso = False
+        self._log_visibile = False
         self._stop_event = threading.Event()
 
+        # Il thread di elaborazione non può aggiornare la finestra da solo:
+        # mette le richieste in questa coda e la finestra la controlla
+        # ogni 100 ms (vedi _controlla_coda).
+        self._coda = queue.Queue()
+
         self._build_gui()
+        self.root.after(100, self._controlla_coda)
         self.root.protocol("WM_DELETE_WINDOW", self._esci)
+        # su Mac anche Cmd+Q passa dalla conferma se sta lavorando
+        if sys.platform == "darwin":
+            self.root.createcommand("tk::mac::Quit", self._esci)
 
     def _build_gui(self):
-        # variabile condivisa dalle due UI per la scelta "CPU Workers"
+        # variabile condivisa dalle due UI per la scelta "Uso CPU"
         if USE_CTK:
-            self.opzione_cpu_var = ctk.StringVar(value="AUTO")
+            self.opzione_cpu_var = ctk.StringVar(value="Auto")
             self._build_customtkinter_ui()
         else:
-            self.opzione_cpu_var = tk.StringVar(value="AUTO")
+            self.opzione_cpu_var = tk.StringVar(value="Auto")
             self._build_standard_ui()
+        self.root.resizable(False, False)
+
+    # ---------- grafica con CustomTkinter (quella normale) ----------
+
+    def _font(self, size, bold=False):
+        return ctk.CTkFont(family=FONT_SISTEMA, size=size, weight="bold" if bold else "normal")
+
+    def _pulsante_grigio(self, parent, testo, comando):
+        """Pulsante piccolo e grigio, come "Scegli…" nelle app Apple."""
+        return ctk.CTkButton(
+            parent, text=testo, command=comando, width=80, height=24, corner_radius=6,
+            fg_color=COLORE_PULSANTE, hover_color=COLORE_PULSANTE_HOVER,
+            text_color=COLORE_TESTO, font=self._font(12)
+        )
+
+    def _separatore(self, scheda, riga):
+        """Linea sottile tra due righe della stessa scheda."""
+        linea = ctk.CTkFrame(scheda, height=1, fg_color=COLORE_SEPARATORE)
+        linea.grid(row=riga, column=0, columnspan=3, sticky="ew", padx=(12, 0))
 
     def _build_customtkinter_ui(self):
-        self.root.grid_columnconfigure(0, weight=1)
+        self.root.configure(fg_color=COLORE_SFONDO)
 
-        header = ctk.CTkFrame(self.root, corner_radius=10)
-        header.grid(row=0, column=0, padx=15, pady=10, sticky="ew")
-        ctk.CTkLabel(header, text="🎯 Speed Display Blur (SWM 125 R)", font=ctk.CTkFont(size=18, weight="bold")).pack(padx=15, pady=10)
+        pagina = ctk.CTkFrame(self.root, fg_color="transparent")
+        pagina.pack(fill="both", expand=True, padx=24, pady=(20, 22))
+        pagina.grid_columnconfigure(0, weight=1)
 
-        file_frame = ctk.CTkFrame(self.root, corner_radius=10)
-        file_frame.grid(row=1, column=0, padx=15, pady=5, sticky="ew")
+        # --- titolo ---
+        ctk.CTkLabel(pagina, text="Velocità", font=self._font(26, bold=True),
+                     text_color=COLORE_TESTO, anchor="w").grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(pagina, text="Nasconde il numero della velocità nei video della moto.",
+                     font=self._font(13), text_color=COLORE_GRIGIO, anchor="w"
+                     ).grid(row=1, column=0, sticky="w", pady=(0, 18))
 
-        self.entry_input = ctk.CTkEntry(file_frame, placeholder_text="Seleziona File Video...", width=500)
-        self.entry_input.grid(row=0, column=0, padx=10, pady=10)
-        ctk.CTkButton(file_frame, text="Sfoglia File", command=self._select_input).grid(row=0, column=1, padx=10, pady=10)
+        # --- scheda FILE ---
+        ctk.CTkLabel(pagina, text="FILE", font=self._font(11), text_color=COLORE_GRIGIO,
+                     anchor="w").grid(row=2, column=0, sticky="w", padx=6, pady=(0, 4))
 
-        self.entry_output = ctk.CTkEntry(file_frame, placeholder_text="Cartella Destinazione...", width=500)
-        self.entry_output.grid(row=1, column=0, padx=10, pady=10)
-        ctk.CTkButton(file_frame, text="Sfoglia Cartella", command=self._select_output).grid(row=1, column=1, padx=10, pady=10)
+        scheda_file = ctk.CTkFrame(pagina, corner_radius=10, fg_color=COLORE_SCHEDA)
+        scheda_file.grid(row=3, column=0, sticky="ew", pady=(0, 18))
+        scheda_file.grid_columnconfigure(1, weight=1)
 
-        params_frame = ctk.CTkFrame(self.root, corner_radius=10)
-        params_frame.grid(row=2, column=0, padx=15, pady=10, sticky="ew")
+        ctk.CTkLabel(scheda_file, text="Video", font=self._font(13), text_color=COLORE_TESTO
+                     ).grid(row=0, column=0, padx=(12, 8), pady=9, sticky="w")
+        self.lbl_video = ctk.CTkLabel(scheda_file, text="Nessun file", font=self._font(13),
+                                      text_color=COLORE_GRIGIO, anchor="e", width=230)
+        self.lbl_video.grid(row=0, column=1, sticky="e")
+        self._pulsante_grigio(scheda_file, "Scegli…", self._select_input
+                              ).grid(row=0, column=2, padx=12, pady=9)
 
-        self.switch_debug = ctk.CTkSwitch(params_frame, text="Debug Visivo (verde=zona rilevata, rosso=zona sfuocata, nessun effetto reale)")
-        self.switch_debug.grid(row=0, column=0, padx=15, pady=10, sticky="w")
+        self._separatore(scheda_file, 1)
 
-        cpu_row = ctk.CTkFrame(params_frame, fg_color="transparent")
-        cpu_row.grid(row=1, column=0, padx=15, pady=(0, 10), sticky="w")
+        ctk.CTkLabel(scheda_file, text="Salva in", font=self._font(13), text_color=COLORE_TESTO
+                     ).grid(row=2, column=0, padx=(12, 8), pady=9, sticky="w")
+        self.lbl_cartella = ctk.CTkLabel(scheda_file, text="Accanto al video", font=self._font(13),
+                                         text_color=COLORE_GRIGIO, anchor="e", width=230)
+        self.lbl_cartella.grid(row=2, column=1, sticky="e")
+        self._pulsante_grigio(scheda_file, "Cambia…", self._select_output
+                              ).grid(row=2, column=2, padx=12, pady=9)
 
-        ctk.CTkLabel(cpu_row, text="CPU Workers:").pack(side="left", padx=(0, 8))
-        ctk.CTkOptionMenu(
-            cpu_row, variable=self.opzione_cpu_var,
-            values=list(PERCENTUALI_CPU_WORKERS.keys()), width=110
-        ).pack(side="left")
-        ctk.CTkLabel(
-            cpu_row, text=f"(CPU disponibili: {CPU_TOTALI})",
-            font=ctk.CTkFont(size=11), text_color="gray"
-        ).pack(side="left", padx=(10, 0))
+        # --- scheda OPZIONI ---
+        ctk.CTkLabel(pagina, text="OPZIONI", font=self._font(11), text_color=COLORE_GRIGIO,
+                     anchor="w").grid(row=4, column=0, sticky="w", padx=6, pady=(0, 4))
 
-        progress_frame = ctk.CTkFrame(self.root, corner_radius=10)
-        progress_frame.grid(row=3, column=0, padx=15, pady=10, sticky="ew")
-        progress_frame.grid_columnconfigure(0, weight=1)
+        scheda_opzioni = ctk.CTkFrame(pagina, corner_radius=10, fg_color=COLORE_SCHEDA)
+        scheda_opzioni.grid(row=5, column=0, sticky="ew", pady=(0, 20))
+        scheda_opzioni.grid_columnconfigure(1, weight=1)
 
-        self.spinner = SpinnerLiquidGlass(progress_frame)
-        self.spinner.grid(row=0, column=0, pady=(14, 4))
+        # "Mostra i riquadri" = la vecchia modalità Debug Visivo:
+        # verde = zona rilevata, rosso = zona che verrebbe sfuocata
+        ctk.CTkLabel(scheda_opzioni, text="Mostra i riquadri (prova)", font=self._font(13),
+                     text_color=COLORE_TESTO).grid(row=0, column=0, padx=12, pady=10, sticky="w")
+        self.switch_debug = ctk.CTkSwitch(scheda_opzioni, text="", width=44,
+                                          switch_width=40, switch_height=22,
+                                          progress_color=BLU, button_color="#ffffff",
+                                          button_hover_color="#ffffff", fg_color=COLORE_PULSANTE_HOVER)
+        self.switch_debug.grid(row=0, column=2, padx=(0, 4), pady=10, sticky="e")
 
-        self.progress_bar = ctk.CTkProgressBar(progress_frame, width=260, height=6)
+        self._separatore(scheda_opzioni, 1)
+
+        ctk.CTkLabel(scheda_opzioni, text="Uso CPU", font=self._font(13),
+                     text_color=COLORE_TESTO).grid(row=2, column=0, padx=12, pady=10, sticky="w")
+        ctk.CTkSegmentedButton(
+            scheda_opzioni, variable=self.opzione_cpu_var,
+            values=list(PERCENTUALI_CPU_WORKERS.keys()), font=self._font(12), height=26,
+            fg_color=COLORE_PULSANTE, unselected_color=COLORE_PULSANTE,
+            unselected_hover_color=COLORE_PULSANTE_HOVER,
+            selected_color=COLORE_SELEZIONATO, selected_hover_color=COLORE_SELEZIONATO,
+            text_color=COLORE_TESTO
+        ).grid(row=2, column=2, padx=12, pady=10, sticky="e")
+
+        # --- avanzamento ---
+        self.progress_bar = ctk.CTkProgressBar(pagina, height=4, corner_radius=2,
+                                               progress_color=BLU, fg_color=COLORE_PULSANTE)
         self.progress_bar.set(0)
-        self.progress_bar.grid(row=1, column=0, pady=(8, 4))
+        self.progress_bar.grid(row=6, column=0, sticky="ew")
 
-        self.lbl_percentage = ctk.CTkLabel(progress_frame, text="0%", font=ctk.CTkFont(size=15, weight="bold"))
-        self.lbl_percentage.grid(row=2, column=0, pady=(0, 6))
+        riga_stato = ctk.CTkFrame(pagina, fg_color="transparent")
+        riga_stato.grid(row=7, column=0, sticky="ew", pady=(4, 14))
+        riga_stato.grid_columnconfigure(0, weight=1)
 
-        self.lbl_details = ctk.CTkLabel(progress_frame, text="Stato: In attesa di elaborazione...", font=ctk.CTkFont(size=12))
-        self.lbl_details.grid(row=3, column=0, padx=10, pady=(0, 10))
+        self.lbl_details = ctk.CTkLabel(riga_stato, text="Pronto", font=self._font(12),
+                                        text_color=COLORE_GRIGIO, anchor="w", height=18)
+        self.lbl_details.grid(row=0, column=0, sticky="w")
+        self.lbl_percentage = ctk.CTkLabel(riga_stato, text="", font=self._font(12),
+                                           text_color=COLORE_GRIGIO, anchor="e", height=18)
+        self.lbl_percentage.grid(row=0, column=1, sticky="e")
 
-        self.lbl_link = ctk.CTkLabel(
-            progress_frame, text="", font=ctk.CTkFont(size=14, underline=True),
-            text_color="#4aa8ff", cursor="hand2"
+        # --- pulsanti ---
+        self.btn_start = ctk.CTkButton(
+            pagina, text="Avvia", font=self._font(14, bold=True), height=36, corner_radius=8,
+            fg_color=BLU, hover_color=BLU_HOVER, text_color="#ffffff", command=self._click_avvia
         )
-        self.lbl_link.grid(row=4, column=0, padx=10, pady=(0, 14))
-        self.lbl_link.bind("<Button-1>", lambda e: self._apri_file(self._output_path))
+        self.btn_start.grid(row=8, column=0, sticky="ew")
 
-        azioni_frame = ctk.CTkFrame(self.root, fg_color="transparent")
-        azioni_frame.grid(row=4, column=0, padx=15, pady=5, sticky="ew")
-        azioni_frame.grid_columnconfigure(0, weight=3)
-        azioni_frame.grid_columnconfigure(1, weight=1)
+        # "Apri video" compare solo quando il video è pronto
+        self.btn_apri = self._pulsante_grigio(pagina, "Apri video",
+                                              lambda: self._apri_file(self._output_path))
+        self.btn_apri.configure(height=30)
+        self.btn_apri.grid(row=9, column=0, sticky="ew", pady=(8, 0))
+        self.btn_apri.grid_remove()
 
-        self.btn_start = ctk.CTkButton(azioni_frame, text="► AVVIA ELABORAZIONE", font=ctk.CTkFont(size=16, weight="bold"), height=40, command=self._start_thread)
-        self.btn_start.grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        # --- dettagli (log), nascosti finché non servono ---
+        self.lbl_dettagli = ctk.CTkLabel(pagina, text="▸ Mostra dettagli", font=self._font(12),
+                                         text_color=COLORE_GRIGIO, cursor="hand2", anchor="w")
+        self.lbl_dettagli.grid(row=10, column=0, sticky="w", pady=(10, 0))
+        self.lbl_dettagli.bind("<Button-1>", lambda e: self._mostra_nascondi_log())
 
-        self.btn_esci = ctk.CTkButton(
-            azioni_frame, text="✕ Esci", font=ctk.CTkFont(size=14, weight="bold"), height=40,
-            fg_color="#8b2f2f", hover_color="#6e2020", command=self._esci
-        )
-        self.btn_esci.grid(row=0, column=1, sticky="ew")
+        self.txt_log = ctk.CTkTextbox(pagina, height=120, corner_radius=8, fg_color=COLORE_SCHEDA,
+                                      text_color=COLORE_TESTO, font=ctk.CTkFont(family="Menlo", size=11))
+        self.txt_log.grid(row=11, column=0, sticky="ew", pady=(6, 0))
+        self.txt_log.grid_remove()
 
-        self.txt_log = ctk.CTkTextbox(self.root, height=120)
-        self.txt_log.grid(row=5, column=0, padx=15, pady=10, sticky="ew")
+    # ---------- grafica con tkinter puro (se manca CustomTkinter) ----------
 
     def _build_standard_ui(self):
-        frame = tk.Frame(self.root, padx=15, pady=15)
-        frame.pack(fill=tk.BOTH, expand=True)
+        pagina = ttk.Frame(self.root, padding=(24, 20, 24, 22))
+        pagina.pack(fill=tk.BOTH, expand=True)
+        pagina.grid_columnconfigure(0, weight=1)
 
-        tk.Label(frame, text="Speed Display Blur (SWM 125 R)", font=("Arial", 16, "bold")).pack(pady=5)
+        ttk.Label(pagina, text="Velocità", font=(FONT_SISTEMA, 24, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(pagina, text="Nasconde il numero della velocità nei video della moto.",
+                  foreground="gray").grid(row=1, column=0, sticky="w", pady=(0, 14))
 
-        f_inputs = tk.LabelFrame(frame, text=" File & Destinazione ")
-        f_inputs.pack(fill=tk.X, pady=5)
+        scheda_file = ttk.LabelFrame(pagina, text="File", padding=8)
+        scheda_file.grid(row=2, column=0, sticky="ew", pady=(0, 12))
+        scheda_file.grid_columnconfigure(1, weight=1)
 
-        self.entry_input = tk.Entry(f_inputs, width=50)
-        self.entry_input.grid(row=0, column=0, padx=5, pady=5)
-        tk.Button(f_inputs, text="Sfoglia Input", command=self._select_input).grid(row=0, column=1, padx=5)
+        ttk.Label(scheda_file, text="Video").grid(row=0, column=0, sticky="w")
+        self.lbl_video = ttk.Label(scheda_file, text="Nessun file", foreground="gray", width=30, anchor="e")
+        self.lbl_video.grid(row=0, column=1, sticky="e", padx=8)
+        ttk.Button(scheda_file, text="Scegli…", command=self._select_input).grid(row=0, column=2, pady=3)
 
-        self.entry_output = tk.Entry(f_inputs, width=50)
-        self.entry_output.grid(row=1, column=0, padx=5, pady=5)
-        tk.Button(f_inputs, text="Sfoglia Output", command=self._select_output).grid(row=1, column=1, padx=5)
+        ttk.Label(scheda_file, text="Salva in").grid(row=1, column=0, sticky="w")
+        self.lbl_cartella = ttk.Label(scheda_file, text="Accanto al video", foreground="gray", width=30, anchor="e")
+        self.lbl_cartella.grid(row=1, column=1, sticky="e", padx=8)
+        ttk.Button(scheda_file, text="Cambia…", command=self._select_output).grid(row=1, column=2, pady=3)
 
-        f_opts = tk.LabelFrame(frame, text=" Opzioni ")
-        f_opts.pack(fill=tk.X, pady=5)
+        scheda_opzioni = ttk.LabelFrame(pagina, text="Opzioni", padding=8)
+        scheda_opzioni.grid(row=3, column=0, sticky="ew", pady=(0, 14))
+        scheda_opzioni.grid_columnconfigure(1, weight=1)
 
         self.debug_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(f_opts, text="Debug Visivo (verde=zona rilevata, rosso=zona sfuocata, nessun effetto reale)", variable=self.debug_var).pack(anchor="w", padx=10, pady=5)
+        ttk.Checkbutton(scheda_opzioni, text="Mostra i riquadri (prova)",
+                        variable=self.debug_var).grid(row=0, column=0, columnspan=3, sticky="w", pady=3)
 
-        cpu_row = tk.Frame(f_opts)
-        cpu_row.pack(anchor="w", padx=10, pady=(0, 5), fill=tk.X)
-        tk.Label(cpu_row, text="CPU Workers:").pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Combobox(
-            cpu_row, textvariable=self.opzione_cpu_var,
-            values=list(PERCENTUALI_CPU_WORKERS.keys()), state="readonly", width=8
-        ).pack(side=tk.LEFT)
-        tk.Label(cpu_row, text=f"(CPU disponibili: {CPU_TOTALI})", fg="gray").pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Label(scheda_opzioni, text="Uso CPU").grid(row=1, column=0, sticky="w")
+        ttk.Combobox(scheda_opzioni, textvariable=self.opzione_cpu_var,
+                     values=list(PERCENTUALI_CPU_WORKERS.keys()), state="readonly", width=8
+                     ).grid(row=1, column=2, sticky="e", pady=3)
 
-        f_prog = tk.Frame(frame)
-        f_prog.pack(fill=tk.X, pady=10)
+        self.progress_bar = ttk.Progressbar(pagina, orient="horizontal", mode="determinate")
+        self.progress_bar.grid(row=4, column=0, sticky="ew")
 
-        self.spinner = SpinnerLiquidGlass(f_prog)
-        self.spinner.pack(pady=(4, 6))
+        riga_stato = ttk.Frame(pagina)
+        riga_stato.grid(row=5, column=0, sticky="ew", pady=(4, 12))
+        riga_stato.grid_columnconfigure(0, weight=1)
+        self.lbl_details = ttk.Label(riga_stato, text="Pronto", foreground="gray")
+        self.lbl_details.grid(row=0, column=0, sticky="w")
+        self.lbl_percentage = ttk.Label(riga_stato, text="", foreground="gray")
+        self.lbl_percentage.grid(row=0, column=1, sticky="e")
 
-        self.progress_bar = ttk.Progressbar(f_prog, orient="horizontal", mode="determinate", length=260)
-        self.progress_bar.pack(pady=(4, 4))
+        self.btn_start = ttk.Button(pagina, text="Avvia", command=self._click_avvia)
+        self.btn_start.grid(row=6, column=0, sticky="ew", ipady=4)
 
-        self.lbl_percentage = tk.Label(f_prog, text="0%", font=("Arial", 13, "bold"))
-        self.lbl_percentage.pack(pady=(0, 4))
+        self.btn_apri = ttk.Button(pagina, text="Apri video", command=lambda: self._apri_file(self._output_path))
+        self.btn_apri.grid(row=7, column=0, sticky="ew", pady=(8, 0))
+        self.btn_apri.grid_remove()
 
-        self.lbl_details = tk.Label(frame, text="Stato: In attesa di elaborazione...", font=("Arial", 10))
-        self.lbl_details.pack(pady=2)
+        self.lbl_dettagli = ttk.Label(pagina, text="▸ Mostra dettagli", foreground="gray", cursor="hand2")
+        self.lbl_dettagli.grid(row=8, column=0, sticky="w", pady=(10, 0))
+        self.lbl_dettagli.bind("<Button-1>", lambda e: self._mostra_nascondi_log())
 
-        self.lbl_link = tk.Label(frame, text="", fg="#2266cc", cursor="hand2", font=("Arial", 11, "underline"))
-        self.lbl_link.pack(pady=(0, 6))
-        self.lbl_link.bind("<Button-1>", lambda e: self._apri_file(self._output_path))
+        self.txt_log = tk.Text(pagina, height=7, width=60, relief="flat")
+        self.txt_log.grid(row=9, column=0, sticky="ew", pady=(6, 0))
+        self.txt_log.grid_remove()
 
-        azioni_frame = tk.Frame(frame)
-        azioni_frame.pack(fill=tk.X, pady=5)
+    # ---------- dettagli (log) ----------
 
-        self.btn_start = tk.Button(azioni_frame, text="AVVIA ELABORAZIONE", command=self._start_thread, font=("Arial", 11, "bold"))
-        self.btn_start.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+    def _mostra_nascondi_log(self):
+        if self._log_visibile:
+            self.txt_log.grid_remove()
+            self.lbl_dettagli.configure(text="▸ Mostra dettagli")
+        else:
+            self.txt_log.grid()
+            self.lbl_dettagli.configure(text="▾ Nascondi dettagli")
+        self._log_visibile = not self._log_visibile
 
-        self.btn_esci = tk.Button(
-            azioni_frame, text="✕ Esci", command=self._esci, font=("Arial", 11, "bold"),
-            fg="white", bg="#8b2f2f", activebackground="#6e2020", activeforeground="white"
-        )
-        self.btn_esci.pack(side=tk.LEFT)
-
-        self.txt_log = tk.Text(frame, height=6, width=70)
-        self.txt_log.pack(fill=tk.BOTH, expand=True, pady=5)
+    # ---------- scelta file e cartella ----------
 
     def _select_input(self):
         file_path = filedialog.askopenfilename(
@@ -565,37 +604,49 @@ class ModernSpeedometerApp:
         )
         if file_path:
             self.input_path = file_path
-            self.entry_input.delete(0, tk.END)
-            self.entry_input.insert(0, file_path)
+            self.lbl_video.configure(text=os.path.basename(file_path))
 
             if not self.output_dir:
                 self.output_dir = os.path.dirname(file_path)
-                self.entry_output.delete(0, tk.END)
-                self.entry_output.insert(0, self.output_dir)
+                self.lbl_cartella.configure(text=os.path.basename(self.output_dir) or self.output_dir)
 
     def _select_output(self):
         folder_path = filedialog.askdirectory()
         if folder_path:
             self.output_dir = folder_path
-            self.entry_output.delete(0, tk.END)
-            self.entry_output.insert(0, folder_path)
+            self.lbl_cartella.configure(text=os.path.basename(folder_path) or folder_path)
+
+    # ---------- comunicazione tra thread e finestra ----------
+
+    def _in_gui(self, funzione, *argomenti):
+        """Chiamata dal thread di elaborazione: chiede alla finestra di
+        eseguire funzione(*argomenti) appena può."""
+        self._coda.put((funzione, argomenti))
+
+    def _controlla_coda(self):
+        # Gira nella finestra ogni 100 ms ed esegue le richieste arrivate.
+        # (Prima il thread usava root.after(), ma chiamato da un altro
+        # thread a volte non arriva mai: la barra restava ferma.)
+        while not self._coda.empty():
+            funzione, argomenti = self._coda.get()
+            funzione(*argomenti)
+        try:
+            self.root.after(100, self._controlla_coda)
+        except tk.TclError:
+            pass  # la finestra è stata chiusa
 
     def log(self, message):
         # Il thread di elaborazione non può toccare la GUI direttamente
         # (tkinter non lo permette e a volte si blocca o va in crash):
         # chiede alla finestra di scrivere lei il messaggio appena può.
-        try:
-            self.root.after(0, self._scrivi_log, message)
-        except (tk.TclError, RuntimeError):
-            pass  # la finestra è già stata chiusa
+        self._in_gui(self._scrivi_log, message)
 
     def _scrivi_log(self, message):
-        if USE_CTK:
-            self.txt_log.insert(ctk.END, message + "\n")
-            self.txt_log.see(ctk.END)
-        else:
-            self.txt_log.insert(tk.END, message + "\n")
-            self.txt_log.see(tk.END)
+        self.txt_log.insert(tk.END, message + "\n")
+        self.txt_log.see(tk.END)
+        # se c'è un errore apre da solo i dettagli, così si vede subito
+        if message.startswith("[ERRORE]") and not self._log_visibile:
+            self._mostra_nascondi_log()
 
     # ---------- link per aprire il video finale ----------
 
@@ -632,13 +683,21 @@ class ModernSpeedometerApp:
             self._chiudi_finestra()
 
     def _chiudi_finestra(self):
-        self.spinner.ferma()
         self.root.quit()
         self.root.destroy()
 
+    def _click_avvia(self):
+        # lo stesso pulsante fa "Avvia" e, mentre lavora, "Interrompi"
+        if self._elaborazione_in_corso:
+            self._stop_event.set()
+            self.btn_start.configure(state="disabled")
+            self.lbl_details.configure(text="Interruzione…")
+        else:
+            self._start_thread()
+
     def _start_thread(self):
-        in_p = self.entry_input.get()
-        out_p = self.entry_output.get()
+        in_p = self.input_path
+        out_p = self.output_dir
 
         if not os.path.isfile(in_p):
             messagebox.showerror("Errore", "Selezionare un file di input valido.")
@@ -649,8 +708,7 @@ class ModernSpeedometerApp:
         if out_p.strip() == "":
             out_p = os.path.dirname(os.path.abspath(in_p))
             self.output_dir = out_p
-            self.entry_output.delete(0, tk.END)
-            self.entry_output.insert(0, out_p)
+            self.lbl_cartella.configure(text=os.path.basename(out_p) or out_p)
 
         # Se la cartella non esiste il video non veniva salvato, ma il
         # programma diceva lo stesso "Completato con successo".
@@ -660,22 +718,17 @@ class ModernSpeedometerApp:
 
         debug = self.switch_debug.get() == 1 if USE_CTK else self.debug_var.get()
 
+        self._update_progress(0, "Avvio…")
+        self.btn_apri.grid_remove()
+        self.btn_start.configure(text="Interrompi")
         if USE_CTK:
-            self.btn_start.configure(state="disabled")
-            self.progress_bar.set(0)
-            self.lbl_percentage.configure(text="0%")
-            self.lbl_details.configure(text="Avvio in corso...")
-            self.lbl_link.configure(text="")
-        else:
-            self.btn_start.config(state="disabled")
-            self.lbl_percentage.config(text="0%")
-            self.lbl_details.config(text="Avvio in corso...")
-            self.lbl_link.config(text="")
+            # mentre lavora il pulsante diventa grigio
+            self.btn_start.configure(fg_color=COLORE_PULSANTE, hover_color=COLORE_PULSANTE_HOVER,
+                                     text_color=COLORE_TESTO)
 
         self._output_path = ""
         self._stop_event.clear()
         self._elaborazione_in_corso = True
-        self.spinner.avvia()
 
         t = threading.Thread(target=self._process, args=(in_p, out_p, debug))
         t.daemon = True
@@ -743,7 +796,7 @@ class ModernSpeedometerApp:
                 raise ValueError("Il video elaborato non è stato creato.")
 
             self.log("[+] Sincronizzazione audio in corso...")
-            self.root.after(0, self._update_progress, 1.0, "Sincronizzazione audio in corso...")
+            self._in_gui(self._update_progress, 1.0, "Sincronizzazione audio in corso...")
 
             if ffmpeg_bin:
                 cmd = [
@@ -781,10 +834,7 @@ class ModernSpeedometerApp:
             self._messaggio_finale = "Errore: guarda il log qui sotto."
         finally:
             self._elaborazione_in_corso = False
-            try:
-                self.root.after(0, self._reset_ui)
-            except (tk.TclError, RuntimeError):
-                pass  # la finestra è già stata chiusa (uscita forzata)
+            self._in_gui(self._reset_ui)
 
     def _elabora_immagine(self, in_file, out_dir, name, ext, debug):
         """Pixella il display in una singola foto e la salva con lo stesso formato."""
@@ -804,7 +854,7 @@ class ModernSpeedometerApp:
             raise ValueError("Impossibile salvare l'immagine.")
         codificata.tofile(final_out)
 
-        self.root.after(0, self._update_progress, 1.0, "Foto elaborata.")
+        self._in_gui(self._update_progress, 1.0, "Foto elaborata.")
         self._output_path = final_out
         self.log(f"[✓] Completato con successo! Salvato in: {final_out}")
 
@@ -843,11 +893,11 @@ class ModernSpeedometerApp:
                 if count > 5 and elapsed > 0:
                     fps_proc = count / elapsed
                     eta_seconds = frames_left / fps_proc if fps_proc > 0 else 0
-                    eta_str = time.strftime('%M:%S', time.gmtime(eta_seconds))
+                    eta_str = formatta_tempo(eta_seconds)
                 else:
-                    eta_str = "Calcolo..."
-                details_text = f"Mancanti: {frames_left} frame | Tempo stimato (ETA): {eta_str}"
-                self.root.after(0, self._update_progress, pct, details_text)
+                    eta_str = "…"
+                details_text = f"Elaborazione… mancano {eta_str}"
+                self._in_gui(self._update_progress, pct, details_text)
 
         cap.release()
         out.release()
@@ -904,11 +954,11 @@ class ModernSpeedometerApp:
                     if fatti > 5 and elapsed > 0:
                         fps_proc = fatti / elapsed
                         eta_seconds = frames_left / fps_proc if fps_proc > 0 else 0
-                        eta_str = time.strftime('%M:%S', time.gmtime(eta_seconds))
+                        eta_str = formatta_tempo(eta_seconds)
                     else:
-                        eta_str = "Calcolo..."
-                    details_text = f"Mancanti: {frames_left} frame | Tempo stimato (ETA): {eta_str}"
-                    self.root.after(0, self._update_progress, pct, details_text)
+                        eta_str = "…"
+                    details_text = f"Elaborazione… mancano {eta_str}"
+                    self._in_gui(self._update_progress, pct, details_text)
 
                 time.sleep(0.2)
 
@@ -942,30 +992,27 @@ class ModernSpeedometerApp:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _update_progress(self, pct, details_text):
-        percent_str = f"{int(pct * 100)}%"
         if USE_CTK:
             self.progress_bar.set(pct)
-            self.lbl_percentage.configure(text=percent_str)
-            self.lbl_details.configure(text=details_text)
         else:
             self.progress_bar['value'] = pct * 100
-            self.lbl_percentage.config(text=percent_str)
-            self.lbl_details.config(text=details_text)
+        self.lbl_percentage.configure(text=f"{int(pct * 100)}%")
+        self.lbl_details.configure(text=details_text)
 
     def _reset_ui(self):
-        self.spinner.ferma()
         # prima diceva sempre "completata", anche dopo un errore o uno stop
         messaggio = getattr(self, "_messaggio_finale", "Elaborazione completata.")
+        self.lbl_details.configure(text=messaggio)
+        self.btn_start.configure(text="Avvia", state="normal")
         if USE_CTK:
-            self.btn_start.configure(state="normal")
-            self.lbl_details.configure(text=messaggio)
-            if self._output_path:
-                self.lbl_link.configure(text="▶ Apri il video elaborato")
-        else:
-            self.btn_start.config(state="normal")
-            self.lbl_details.config(text=messaggio)
-            if self._output_path:
-                self.lbl_link.config(text="▶ Apri il video elaborato")
+            self.btn_start.configure(fg_color=BLU, hover_color=BLU_HOVER, text_color="#ffffff")
+        if self._output_path:
+            _, ext = os.path.splitext(self._output_path)
+            if ext.lower() in ESTENSIONI_IMMAGINI:
+                self.btn_apri.configure(text="Apri foto")
+            else:
+                self.btn_apri.configure(text="Apri video")
+            self.btn_apri.grid()
 
 
 if __name__ == "__main__":

@@ -1,3 +1,28 @@
+# Velocità
+
+`velocita.py` è il programma principale: una finestra semplice che nasconde
+il numero della velocità nei video (e nelle foto) della moto.
+
+```bash
+pip install -r requirements.txt customtkinter
+python velocita.py
+```
+
+Serve **ffmpeg** per tenere l'audio e per usare più core della CPU.
+
+### Release automatica
+
+Quando crei un tag con la versione e lo carichi su GitHub, parte da solo lo
+script in `.github/workflows/release.yml`: crea `Velocita.exe` (Windows) e
+`Velocita-mac.zip` (Mac) e li mette nella release.
+
+```bash
+git tag vNUMERO_VERSIONE
+git push origin vNUMERO_VERSIONE
+```
+
+---
+
 # tachometer-blur
 
 Pixelizza automaticamente il tachimetro/cruscotto in video onboard di moto,
