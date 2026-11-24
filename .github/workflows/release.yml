@@ -1,0 +1,76 @@
+# Questo script crea Velocita.exe (Windows) e Velocita-mac.zip (Mac),
+# con dentro ffmpeg, cosi' chi lo usa non deve installarlo.
+# - Se carichi un tag tipo v1.0.0: li mette nella release del tag
+# - Se premi "Run workflow" nella pagina Actions: li trovi in fondo alla pagina del run
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      - name: Installa Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installa le librerie
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt customtkinter pyinstaller imageio-ffmpeg
+
+      - name: Prendi ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cp "$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" ffmpeg.exe
+
+      - name: Prendi ffmpeg (Mac)
+        if: runner.os == 'macOS'
+        run: |
+          cp "$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" ffmpeg
+          chmod +x ffmpeg
+
+      - name: Crea Velocita.exe
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          pyinstaller --onefile --windowed --name Velocita --collect-all customtkinter --add-binary "ffmpeg.exe;." velocita.py
+
+      - name: Crea Velocita.app e lo comprime
+        if: runner.os == 'macOS'
+        run: |
+          pyinstaller --windowed --name Velocita --collect-all customtkinter --add-binary "ffmpeg:." velocita.py
+          ditto -c -k --keepParent dist/Velocita.app dist/Velocita-mac.zip
+
+      - name: Salva i file nella pagina del run
+        uses: actions/upload-artifact@v4
+        with:
+          name: Velocita-${{ runner.os }}
+          path: |
+            dist/Velocita.exe
+            dist/Velocita-mac.zip
+          if-no-files-found: ignore
+
+      - name: Carica nella release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Velocita.exe
+            dist/Velocita-mac.zip

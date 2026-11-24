@@ -352,6 +352,17 @@ def formatta_tempo(secondi):
     return f"{minuti}:{sec:02d}"
 
 
+def trova_ffmpeg():
+    """Cerca ffmpeg: prima quello messo dentro l'app (release), poi quello installato."""
+    # quando il programma è un .exe o un'app Mac, i file inclusi stanno in sys._MEIPASS
+    if getattr(sys, "frozen", False):
+        nome = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+        percorso = os.path.join(sys._MEIPASS, nome)
+        if os.path.exists(percorso):
+            return percorso
+    return shutil.which("ffmpeg")
+
+
 # ==========================================
 # INTERFACCIA GRAFICA (GUI)
 # ==========================================
@@ -763,7 +774,7 @@ class ModernSpeedometerApp:
             temp_out = os.path.join(out_dir, f"temp_{name}.mp4")
             final_out = os.path.join(out_dir, f"{name}_speed_blur.mp4")
 
-            ffmpeg_bin = shutil.which("ffmpeg")
+            ffmpeg_bin = trova_ffmpeg()
 
             opzione_scelta = self.opzione_cpu_var.get()
             percentuale = PERCENTUALI_CPU_WORKERS.get(opzione_scelta, 0.50)
@@ -981,7 +992,7 @@ class ModernSpeedometerApp:
                 for s in segmenti:
                     f.write(f"file '{s}'\n")
 
-            ffmpeg_bin = shutil.which("ffmpeg")
+            ffmpeg_bin = trova_ffmpeg()
             cmd = [ffmpeg_bin, "-y", "-f", "concat", "-safe", "0", "-i", elenco_path, "-c", "copy", temp_out]
             risultato = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if risultato.returncode != 0:
