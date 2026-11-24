@@ -24,9 +24,15 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "nsis"],
+    "targets": [
+      "app",
+      "dmg",
+      "nsis"
+    ],
     "createUpdaterArtifacts": true,
-    "externalBin": ["binaries/ffmpeg"],
+    "externalBin": [
+      "binaries/ffmpeg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,13 +46,15 @@
     },
     "windows": {
       "nsis": {
-        "languages": ["Italian"]
+        "languages": [
+          "Italian"
+        ]
       }
     }
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERDNjkwNDY3MDlBMDdDRDgKUldUWWZLQUpad1JwM1BtdWFDK09QWHA4MGxEcjJWc2xNVktwVGJxMmxRL2dCOEtRcjIxeUpmcnkK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhFQ0JCNEQzQkJBNUMwREYKUldUZndLVzcwN1RManNYVXV1dDd5a3FsVVI1cnQ4Y21DSHNBaE1GaGlKYWsrMllWOHBpQ3Mxbi8K",
       "endpoints": [
         "https://github.com/sim40702-debug/velocita/releases/latest/download/latest.json"
       ],
