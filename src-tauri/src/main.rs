@@ -45,6 +45,8 @@ struct SceltaDisplay {
     colore: String,
     /// il colore preso dal video (solo con "video")
     rgb: [u8; 3],
+    /// "basso" o "ovunque": dove cercare il display
+    posizione: String,
 }
 
 fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) -> Impostazioni {
@@ -54,6 +56,7 @@ fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) 
         debug,
         momento: Momento::da_nome(&display.momento),
         colore: ColoreDisplay::da_nome(&display.colore, display.rgb),
+        ovunque: display.posizione == "ovunque",
     }
 }
 
@@ -103,6 +106,8 @@ struct Zona {
 struct RispostaAnteprima {
     immagine: String,
     zona: Option<Zona>,
+    /// "giorno" o "notte": quello usato per questo fotogramma
+    momento: String,
 }
 
 fn in_percentuale(r: Riquadro, larghezza: usize, altezza: usize) -> Zona {
@@ -141,7 +146,8 @@ async fn anteprima(
         );
 
         let zona = a.zona_coperta.map(|r| in_percentuale(r, larghezza, altezza));
-        Ok(RispostaAnteprima { immagine, zona })
+        let momento = if a.momento == Momento::Giorno { "giorno" } else { "notte" };
+        Ok(RispostaAnteprima { immagine, zona, momento: momento.to_string() })
     })
     .await
     .map_err(|e| e.to_string())?

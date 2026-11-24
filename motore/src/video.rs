@@ -11,7 +11,9 @@ use std::thread;
 
 use rayon::prelude::*;
 
-use crate::rilevamento::{copri, regione_centrale, trova_display, Fotogramma, Impostazioni, Inseguitore, Riquadro};
+use crate::rilevamento::{
+    copri, momento_usato, regione_centrale, trova_display, Fotogramma, Impostazioni, Inseguitore, Momento, Riquadro,
+};
 
 // Estensioni trattate come foto (tutte le altre vengono aperte come video)
 pub const ESTENSIONI_IMMAGINI: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
@@ -189,6 +191,8 @@ pub struct Anteprima {
     pub foto: Fotogramma,
     pub display: Option<Riquadro>,
     pub zona_coperta: Option<Riquadro>,
+    /// giorno o notte, quello usato per questo fotogramma
+    pub momento: Momento,
 }
 
 /// Legge un solo fotogramma al secondo indicato.
@@ -220,7 +224,8 @@ pub fn anteprima(ffmpeg: &Path, percorso: &Path, posizione: f64, imp: &Impostazi
     };
     let display = trova_display(&foto, imp);
     let zona_coperta = display.map(|r| regione_centrale(r, foto.larghezza, foto.altezza));
-    Ok(Anteprima { foto, display, zona_coperta })
+    let momento = momento_usato(&foto, imp);
+    Ok(Anteprima { foto, display, zona_coperta, momento })
 }
 
 // ==========================================
@@ -278,6 +283,67 @@ pub fn elabora_video(
     annulla: &AtomicBool,
     mut avanzamento: impl FnMut(u64, u64),
 ) -> Result<Esito, String> {
+    // sul Mac prova prima con il chip del Mac (molto più veloce);
+    // se non va, rifà tutto nel modo di sempre (libx264)
+    if cfg!(target_os = "macos") && videotoolbox_funziona(ffmpeg) {
+        let risultato = elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, &mut avanzamento, true);
+        if risultato.is_ok() {
+            return risultato;
+        }
+    }
+    elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, &mut avanzamento, false)
+}
+
+/// Prova veloce: comprime un solo fotogramma nero con il chip del Mac.
+/// Se ffmpeg ci riesce, VideoToolbox funziona su questo computer.
+fn videotoolbox_funziona(ffmpeg: &Path) -> bool {
+    let prova = comando_ffmpeg(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=128x128"])
+        .args(["-frames:v", "1", "-c:v", "h264_videotoolbox", "-f", "null", "-"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    match prova {
+        Ok(stato) => stato.success(),
+        Err(_) => false,
+    }
+}
+
+/// Come comprimere il video.
+/// - veloce = true: usa il chip del Mac (VideoToolbox), con un bitrate alto
+///   per avere una qualità quasi uguale all'originale
+/// - veloce = false: libx264, qualità quasi uguale all'originale (crf 18)
+fn argomenti_codifica(veloce: bool, info: &InfoVideo) -> Vec<String> {
+    let argomenti: Vec<String> = if veloce {
+        // circa 0.2 bit per pixel: 1080x1920 a 30 fps = circa 12 Mbit/s
+        let kbit = (info.larghezza as f64 * info.altezza as f64 * info.fps.max(1.0) * 0.2 / 1000.0) as u64;
+        let kbit = kbit.max(4000);
+        vec![
+            "-c:v".to_string(), "h264_videotoolbox".to_string(),
+            "-b:v".to_string(), format!("{kbit}k"),
+            "-pix_fmt".to_string(), "yuv420p".to_string(),
+        ]
+    } else {
+        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"]
+            .iter()
+            .map(|a| a.to_string())
+            .collect()
+    };
+    argomenti
+}
+
+#[allow(clippy::too_many_arguments)]
+fn elabora_video_con(
+    ffmpeg: &Path,
+    entrata: &Path,
+    uscita: &Path,
+    imp: &Impostazioni,
+    worker: usize,
+    annulla: &AtomicBool,
+    avanzamento: &mut impl FnMut(u64, u64),
+    veloce: bool,
+) -> Result<Esito, String> {
     let info = leggi_info(ffmpeg, entrata)?;
     let dimensione = info.larghezza * info.altezza * 3;
 
@@ -317,10 +383,8 @@ pub fn elabora_video(
     for a in ["-map", "0:v:0", "-map", "1:a?", "-map_metadata", "1"] {
         argomenti.push(a.into());
     }
-    // qualità quasi uguale all'originale
-    for a in ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"] {
-        argomenti.push(a.into());
-    }
+    // come comprimere il video (chip del Mac o libx264)
+    argomenti.extend(argomenti_codifica(veloce, &info));
     // l'audio si copia così com'è se l'mp4 lo accetta, altrimenti diventa AAC
     let audio_copiabile = matches!(info.audio.as_deref(), Some("aac") | Some("mp3") | Some("alac") | Some("ac3"));
     if audio_copiabile {

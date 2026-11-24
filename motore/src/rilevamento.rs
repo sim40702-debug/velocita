@@ -19,9 +19,14 @@ pub const OFFSET_VERTICALE: f32 = 0.18;
 // In Rust la riduzione è fissa a metà: ogni 2x2 pixel diventano 1.
 pub const SCALA_RILEVAMENTO: f32 = 0.5;
 
-// Se per qualche frame il rilevamento fallisce (es. sfocatura), continua
-// a coprire l'ultima posizione nota per questi frame.
-pub const PERSISTENZA_FRAME: u32 = 6;
+// Se per qualche frame il rilevamento fallisce (es. sfocatura, curva,
+// riflesso), continua a coprire l'ultima posizione nota per questi frame.
+// 15 frame = mezzo secondo a 30 fps.
+pub const PERSISTENZA_FRAME: u32 = 15;
+
+// Quanto il riquadro si avvicina alla posizione nuova a ogni fotogramma:
+// 0.5 = fa metà strada. Più basso = si muove più dolcemente.
+pub const MORBIDEZZA: f32 = 0.5;
 
 // Il display sta sempre nella parte bassa dell'immagine (sopra il manubrio).
 // Le zone arancioni con il centro più in alto (lampioni, finestre, muri
@@ -131,6 +136,9 @@ pub struct Impostazioni {
     pub momento: Momento,
     /// Il colore del display
     pub colore: ColoreDisplay,
+    /// false = cerca il display solo nella metà bassa (consigliato),
+    /// true = lo cerca in tutta l'immagine (videocamera messa altrove)
+    pub ovunque: bool,
 }
 
 impl Default for Impostazioni {
@@ -141,6 +149,7 @@ impl Default for Impostazioni {
             debug: false,
             momento: Momento::Automatico,
             colore: ColoreDisplay::da_nome("arancione", [0, 0, 0]),
+            ovunque: false,
         }
     }
 }
@@ -225,9 +234,10 @@ fn e_del_colore(h: f32, s: f32, v: f32, colore: &ColoreDisplay, soglie: &Soglie)
 }
 
 /// Crea la maschera del colore del display sul fotogramma rimpicciolito a metà.
-/// Ritorna (maschera, luminosi, larghezza, altezza): nella maschera 1 = del colore,
-/// in luminosi 1 = acceso, luminoso e carico (come il display).
-fn maschera_colore(foto: &Fotogramma, imp: &Impostazioni) -> (Vec<u8>, Vec<u8>, usize, usize) {
+/// Ritorna (maschera, luminosi, larghezza, altezza, momento): nella maschera
+/// 1 = del colore, in luminosi 1 = acceso, luminoso e carico (come il display).
+/// momento = giorno o notte, quello usato davvero (anche con Automatico).
+fn maschera_colore(foto: &Fotogramma, imp: &Impostazioni) -> (Vec<u8>, Vec<u8>, usize, usize, Momento) {
     // stessa dimensione che usa OpenCV con fx = fy = 0.5
     let pw = ((foto.larghezza as f32) * SCALA_RILEVAMENTO).round() as usize;
     let ph = ((foto.altezza as f32) * SCALA_RILEVAMENTO).round() as usize;
@@ -288,7 +298,18 @@ fn maschera_colore(foto: &Fotogramma, imp: &Impostazioni) -> (Vec<u8>, Vec<u8>, 
             luminosi[i] = 1;
         }
     }
-    (maschera, luminosi, pw, ph)
+    (maschera, luminosi, pw, ph, momento)
+}
+
+/// Giorno o notte: quello che il rilevamento usa davvero per questo
+/// fotogramma (con Automatico lo decide dalla luminosità).
+/// Serve per la scritta nell'anteprima.
+pub fn momento_usato(foto: &Fotogramma, imp: &Impostazioni) -> Momento {
+    if foto.larghezza < 2 || foto.altezza < 2 {
+        return imp.momento;
+    }
+    let (_, _, _, _, momento) = maschera_colore(foto, imp);
+    momento
 }
 
 /// Allarga (dilata) o restringe (erode) la maschera con un quadrato 5x5.
@@ -486,7 +507,7 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
     if foto.larghezza < 2 || foto.altezza < 2 {
         return None;
     }
-    let (maschera, luminosi, pw, ph) = maschera_colore(foto, imp);
+    let (maschera, luminosi, pw, ph, _momento) = maschera_colore(foto, imp);
 
     // chiusura (riempie i buchetti) e apertura (toglie i puntini)
     let maschera = dilata_o_erodi(&maschera, pw, ph, true);
@@ -505,7 +526,7 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
             continue;
         }
         let centro_y = (z.y as f32 + z.h as f32 / 2.0) / ph as f32;
-        if centro_y < ALTEZZA_MINIMA_DISPLAY {
+        if !imp.ovunque && centro_y < ALTEZZA_MINIMA_DISPLAY {
             continue;
         }
         // il display è più largo che alto: così scarta le strisce
@@ -686,11 +707,17 @@ pub fn disegna_riquadro(foto: &mut Fotogramma, r: Riquadro, colore: [u8; 3]) {
 // 4. SEGUE IL DISPLAY FOTOGRAMMA DOPO FOTOGRAMMA
 // ==========================================
 
-/// Ricorda l'ultimo riquadro trovato: se il rilevamento fallisce per pochi
-/// fotogrammi, continua a coprire l'ultima posizione (PERSISTENZA_FRAME).
+/// Ricorda l'ultimo riquadro trovato:
+/// - se il rilevamento fallisce per pochi fotogrammi, continua a coprire
+///   l'ultima posizione (PERSISTENZA_FRAME)
+/// - il riquadro si muove dolcemente, senza tremolare (MORBIDEZZA)
+/// - se il display sembra saltare lontano per un solo fotogramma
+///   (es. un riflesso), non ci crede finché non lo trova lì due volte
 pub struct Inseguitore {
     ultimo_box: Option<Riquadro>,
     persistenza_rimasta: u32,
+    /// riquadro trovato lontano dall'ultimo, in attesa di conferma
+    salto: Option<Riquadro>,
 }
 
 impl Inseguitore {
@@ -698,23 +725,87 @@ impl Inseguitore {
         Inseguitore {
             ultimo_box: None,
             persistenza_rimasta: 0,
+            salto: None,
         }
     }
 
     /// Riceve il risultato del rilevamento di questo fotogramma e dice
     /// quale riquadro usare.
     pub fn aggiorna(&mut self, trovato: Option<Riquadro>) -> Option<Riquadro> {
-        if trovato.is_some() {
-            self.ultimo_box = trovato;
-            self.persistenza_rimasta = PERSISTENZA_FRAME;
-        } else if self.persistenza_rimasta > 0 {
+        let Some(nuovo) = trovato else {
+            // niente display in questo fotogramma
+            self.salto = None;
+            self.manca_il_display();
+            return self.ultimo_box;
+        };
+
+        let Some(vecchio) = self.ultimo_box else {
+            // primo riquadro trovato
+            self.usa(nuovo);
+            return self.ultimo_box;
+        };
+
+        if vicini(vecchio, nuovo) {
+            // il display si è mosso poco: il riquadro lo segue dolcemente,
+            // ma copre sempre tutto il display trovato
+            self.salto = None;
+            let morbido = unisci(nuovo, a_meta_strada(vecchio, nuovo));
+            self.usa(morbido);
+        } else if self.salto.is_some() && vicini(self.salto.unwrap(), nuovo) {
+            // trovato lontano per la seconda volta di fila: è davvero lì
+            self.salto = None;
+            self.usa(nuovo);
+        } else {
+            // trovato lontano una volta sola: forse è un riflesso,
+            // per ora resta dov'era
+            self.salto = Some(nuovo);
+            self.manca_il_display();
+        }
+        self.ultimo_box
+    }
+
+    fn usa(&mut self, riquadro: Riquadro) {
+        self.ultimo_box = Some(riquadro);
+        self.persistenza_rimasta = PERSISTENZA_FRAME;
+    }
+
+    fn manca_il_display(&mut self) {
+        if self.persistenza_rimasta > 0 {
             self.persistenza_rimasta -= 1;
             // tiene ultimo_box così com'è per qualche frame in più
         } else {
             self.ultimo_box = None;
         }
-        self.ultimo_box
     }
+}
+
+/// Due riquadri sono vicini se i loro centri distano meno della
+/// grandezza del primo.
+fn vicini(a: Riquadro, b: Riquadro) -> bool {
+    let dx = (a.x + a.w / 2) - (b.x + b.w / 2);
+    let dy = (a.y + a.h / 2) - (b.y + b.h / 2);
+    let distanza = ((dx * dx + dy * dy) as f32).sqrt();
+    distanza <= a.w.max(a.h) as f32
+}
+
+/// Il riquadro a metà strada (secondo MORBIDEZZA) tra a e b.
+fn a_meta_strada(a: Riquadro, b: Riquadro) -> Riquadro {
+    let passo = |da: i32, verso: i32| da + ((verso - da) as f32 * MORBIDEZZA).round() as i32;
+    Riquadro {
+        x: passo(a.x, b.x),
+        y: passo(a.y, b.y),
+        w: passo(a.w, b.w),
+        h: passo(a.h, b.h),
+    }
+}
+
+/// Il riquadro più piccolo che contiene sia a sia b.
+fn unisci(a: Riquadro, b: Riquadro) -> Riquadro {
+    let x1 = a.x.min(b.x);
+    let y1 = a.y.min(b.y);
+    let x2 = (a.x + a.w).max(b.x + b.w);
+    let y2 = (a.y + a.h).max(b.y + b.h);
+    Riquadro { x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
 }
 
 /// Applica la copertura (o i riquadri di prova) a un fotogramma, dato il

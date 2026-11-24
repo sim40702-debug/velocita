@@ -25,6 +25,17 @@ npm run ffmpeg
 npm run dev
 ```
 
+## Test automatici
+
+```bash
+cargo test -p motore
+```
+
+Controlla che il display venga trovato nei fotogrammi di esempio in
+`motore/tests/fotogrammi` (lampioni, muri, strada illuminata, riflessi...).
+GitHub Actions li fa girare prima di ogni release: se un test fallisce, la
+release non viene creata.
+
 ## Impostazioni del display
 
 In **Impostazioni → Display**:
@@ -32,6 +43,9 @@ In **Impostazioni → Display**:
 - **Momento**: Automatico (capisce da solo se il video è di giorno o di notte), Giorno o Notte
 - **Colore del display**: arancione, rosso, giallo, verde, blu o bianco
 - **Colore preso dal video**: con **Scegli…** clicchi sul display nell'anteprima e l'app cerca quel colore
+- **Posizione del display**: In basso (cerca solo nella metà bassa del video, consigliato) oppure Ovunque
+
+Nell'anteprima, in basso a sinistra, una scritta piccola (es. «Notte · Arancione») dice cosa sta usando l'app.
 
 Le soglie per giorno e notte sono in `motore/src/rilevamento.rs` (`SOGLIE_GIORNO`, `SOGLIE_NOTTE`).
 

@@ -1,4 +1,5 @@
 # Crea l'app per Mac (Apple Silicon + Intel) e Windows, con ffmpeg dentro.
+# Prima fa girare i test del rilevamento: se uno fallisce, si ferma.
 # - Se carichi un tag tipo v1.2.3: crea la release su GitHub con gli
 #   installer e il file latest.json che serve agli aggiornamenti automatici.
 #   Il numero di versione dell'app viene preso dal tag.
@@ -17,7 +18,26 @@ permissions:
   contents: write
 
 jobs:
+  # 1) prima controlla che il rilevamento del display funzioni ancora
+  #    (cargo test -p motore). Se un test fallisce, la release non parte.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      - name: Installa Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Ricorda la compilazione Rust (più veloce le volte dopo)
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test del rilevamento
+        run: cargo test -p motore
+
+  # 2) poi crea l'app per Mac e Windows
   build:
+    needs: test
     strategy:
       fail-fast: false
       matrix:

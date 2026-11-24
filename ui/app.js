@@ -31,6 +31,7 @@ const scelte = {
   momento: "auto",       // auto, giorno, notte
   colore: "arancione",   // arancione, rosso, giallo, verde, blu, bianco, video
   coloreVideo: [255, 140, 26], // il colore preso cliccando sul display (con "video")
+  posizione: "basso",    // basso, ovunque: dove cercare il display
   controllaAggiornamenti: true,
 };
 
@@ -109,7 +110,48 @@ function sceltaDisplay() {
     momento: scelte.momento,
     colore: scelte.colore,
     rgb: scelte.coloreVideo,
+    posizione: scelte.posizione,
   };
+}
+
+// nome e colore del pallino per ogni colore del display
+const NOMI_COLORI = {
+  arancione: "Arancione",
+  rosso: "Rosso",
+  giallo: "Giallo",
+  verde: "Verde",
+  blu: "Blu",
+  bianco: "Bianco",
+  video: "Colore dal video",
+};
+const PALLINI_COLORI = {
+  arancione: "#ff8c1a",
+  rosso: "#ff3b30",
+  giallo: "#ffd60a",
+  verde: "#30d158",
+  blu: "#0a84ff",
+  bianco: "#ffffff",
+};
+
+// la scritta piccola nell'anteprima, es. "Notte · Arancione"
+function mostraInfoAnteprima(risposta) {
+  let testo;
+  if (risposta.zona) {
+    const momento = risposta.momento === "giorno" ? "Giorno" : "Notte";
+    testo = momento + " · " + NOMI_COLORI[scelte.colore];
+    if (scelte.posizione === "ovunque") {
+      testo = testo + " · Ovunque";
+    }
+  } else {
+    testo = "Display non trovato";
+  }
+  let pallino = PALLINI_COLORI[scelte.colore];
+  if (scelte.colore === "video") {
+    pallino = rgbInTesto(scelte.coloreVideo);
+  }
+  $("info-testo").textContent = testo;
+  $("info-pallino").style.background = pallino;
+  $("anteprima-info").classList.remove("nascosto");
 }
 
 // [255, 140, 26] -> "rgb(255,140,26)"
@@ -309,6 +351,7 @@ async function caricaAnteprima() {
     const img = $("anteprima-img");
     img.onload = () => posizionaZona(img, $("anteprima-zona"), risposta.zona);
     img.src = risposta.immagine;
+    mostraInfoAnteprima(risposta);
 
     if (risposta.zona) {
       $("anteprima-carico").classList.add("nascosto");
@@ -323,6 +366,7 @@ async function caricaAnteprima() {
     }
   } catch (errore) {
     if (mioNumero === numeroAnteprima) {
+      $("anteprima-info").classList.add("nascosto");
       $("anteprima-carico").textContent = "Anteprima non disponibile: " + errore;
     }
   }
@@ -770,6 +814,7 @@ async function avvio() {
   aggiornaSegmentato("scelta-cpu", scelte.usoCpu);
   aggiornaSegmentato("scelta-margine", scelte.margine);
   aggiornaSegmentato("scelta-momento", scelte.momento);
+  aggiornaSegmentato("scelta-posizione", scelte.posizione);
   aggiornaColori();
   $("cursore-forza").value = scelte.forza;
   $("valore-forza").textContent = scelte.forza + " px";
@@ -884,6 +929,14 @@ async function avvio() {
     }
   });
   $("btn-scegli-colore").addEventListener("click", apriScegliColore);
+  $("scelta-posizione").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (b) {
+      scelte.posizione = b.dataset.valore;
+      aggiornaSegmentato("scelta-posizione", scelte.posizione);
+      salvaScelte();
+    }
+  });
 
   // scegli il colore dal video
   $("scegli-img").addEventListener("click", cliccaSulVideo);

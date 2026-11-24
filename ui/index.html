@@ -48,6 +48,7 @@
         <img id="anteprima-img" alt="Anteprima">
         <div id="anteprima-zona" class="zona-rossa nascosto"></div>
         <div id="anteprima-carico" class="anteprima-messaggio">Carico l'anteprima…</div>
+        <div id="anteprima-info" class="info-anteprima nascosto"><i id="info-pallino"></i><span id="info-testo"></span></div>
       </div>
       <input id="cursore-anteprima" type="range" min="0" max="1000" value="300">
       <p id="testo-anteprima" class="nota">Il riquadro rosso è la zona che verrà coperta. Sposta per controllare.</p>
@@ -203,8 +204,15 @@
           <i id="pallino-video" class="pallino nascosto"></i>
           <button id="btn-scegli-colore" class="link">Scegli…</button>
         </div>
+        <div class="riga">
+          <span>Posizione del display</span>
+          <div id="scelta-posizione" class="segmentato stretto">
+            <button data-valore="basso" class="attivo">In basso</button>
+            <button data-valore="ovunque">Ovunque</button>
+          </div>
+        </div>
       </div>
-      <p id="nota-display" class="nota">Automatico capisce da solo se il video è di giorno o di notte.<br>Con «Scegli…» clicchi sul display nell'anteprima e l'app usa quel colore.</p>
+      <p id="nota-display" class="nota">Automatico capisce da solo se il video è di giorno o di notte.<br>Con «Scegli…» clicchi sul display nell'anteprima e l'app usa quel colore.<br>«In basso»: cerca il display solo nella metà bassa del video (consigliato).<br>«Ovunque»: se la videocamera è messa in un altro posto.</p>
     </section>
 
     <!-- 7. SCEGLI IL COLORE DAL VIDEO -->

@@ -618,6 +618,11 @@ input[type="range"] {
   margin-left: 0;
 }
 
+/* senza pallino "Scegli…" torna a destra */
+.riga > .pallino.nascosto + .link:last-child {
+  margin-left: auto;
+}
+
 /* numero accanto alla barra della forza (es. "10 px") */
 .numero-forza {
   flex-shrink: 0;
@@ -625,4 +630,29 @@ input[type="range"] {
   text-align: right;
   color: var(--grigio);
   font-variant-numeric: tabular-nums;
+}
+
+/* ---------- SCRITTA NELL'ANTEPRIMA (es. "Notte · Arancione") ---------- */
+
+.info-anteprima {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 9px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.info-anteprima i {
+  display: block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
 }
