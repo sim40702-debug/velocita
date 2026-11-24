@@ -12,7 +12,8 @@ use std::thread;
 use rayon::prelude::*;
 
 use crate::rilevamento::{
-    copri, momento_usato, regione_centrale, trova_display, Fotogramma, Impostazioni, Inseguitore, Momento, Riquadro,
+    copri, momento_usato, regione_centrale, trova_display, trova_display_con_sicurezza, vicini, zona_da_coprire,
+    Fotogramma, Impostazioni, Inseguitore, Momento, Riquadro,
 };
 
 // Estensioni trattate come foto (tutte le altre vengono aperte come video)
@@ -191,6 +192,9 @@ pub struct Anteprima {
     pub foto: Fotogramma,
     pub display: Option<Riquadro>,
     pub zona_coperta: Option<Riquadro>,
+    /// la zona automatica, senza la regolazione fatta a mano
+    /// (serve alla finestra per regolarla)
+    pub zona_base: Option<Riquadro>,
     /// giorno o notte, quello usato per questo fotogramma
     pub momento: Momento,
 }
@@ -223,9 +227,10 @@ pub fn anteprima(ffmpeg: &Path, percorso: &Path, posizione: f64, imp: &Impostazi
         leggi_fotogramma(ffmpeg, percorso, &info, secondi)?
     };
     let display = trova_display(&foto, imp);
-    let zona_coperta = display.map(|r| regione_centrale(r, foto.larghezza, foto.altezza));
+    let zona_coperta = display.map(|r| zona_da_coprire(r, foto.larghezza, foto.altezza, imp));
+    let zona_base = display.map(|r| regione_centrale(r, foto.larghezza, foto.altezza));
     let momento = momento_usato(&foto, imp);
-    Ok(Anteprima { foto, display, zona_coperta, momento })
+    Ok(Anteprima { foto, display, zona_coperta, zona_base, momento })
 }
 
 // ==========================================
@@ -525,4 +530,135 @@ fn leggi_tutto(sorgente: &mut impl Read, buffer: &mut [u8]) -> Result<(), ()> {
         }
     }
     Ok(())
+}
+
+// ==========================================
+// ANALISI VELOCE PER LA STRISCIA COLORATA
+// ==========================================
+
+/// Quanti punti al secondo controlla l'analisi.
+pub const PUNTI_AL_SECONDO: f64 = 2.0;
+
+/// Com'è andato il rilevamento in un punto del video.
+pub const NON_TROVATO: u8 = 0; // rosso: il numero potrebbe vedersi
+pub const INCERTO: u8 = 1; // arancione: meglio dare un'occhiata
+pub const TROVATO: u8 = 2; // verde: coperto
+
+/// Sotto questa sicurezza il punto è "incerto" (c'è un rivale quasi uguale).
+pub const SICUREZZA_MINIMA: f32 = 0.3;
+
+/// Controlla velocemente tutto il video e dice, punto per punto (2 al secondo),
+/// se il display viene trovato. Per essere veloce legge solo i fotogrammi
+/// chiave, quelli che ffmpeg decodifica subito.
+/// avanzamento(stati finora, punti totali) viene chiamato mentre lavora.
+pub fn analizza_copertura(
+    ffmpeg: &Path,
+    percorso: &Path,
+    imp: &Impostazioni,
+    worker: usize,
+    annulla: &AtomicBool,
+    mut avanzamento: impl FnMut(&[u8], usize),
+) -> Result<Vec<u8>, String> {
+    let info = leggi_info(ffmpeg, percorso)?;
+    let totali = ((info.durata * PUNTI_AL_SECONDO).ceil() as usize).max(1);
+    let dimensione = info.larghezza * info.altezza * 3;
+
+    let gruppo_core = rayon::ThreadPoolBuilder::new()
+        .num_threads(worker.max(1))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // ffmpeg: solo fotogrammi chiave, ripetuti per averne 2 al secondo
+    let filtro = format!("fps={PUNTI_AL_SECONDO}");
+    let mut lettore = comando_ffmpeg(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-skip_frame", "nokey", "-i"])
+        .arg(percorso)
+        .args(["-map", "0:v:0", "-vf", &filtro, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("Non riesco ad avviare ffmpeg: {e}"))?;
+    let mut entrata = lettore.stdout.take().unwrap();
+
+    // (riquadro, sicurezza) di ogni punto
+    let mut trovati: Vec<Option<(Riquadro, f32)>> = Vec::new();
+    let mut stati: Vec<u8> = Vec::new();
+    let per_gruppo = (worker * 2).max(4);
+
+    loop {
+        if annulla.load(Ordering::Relaxed) {
+            let _ = lettore.kill();
+            let _ = lettore.wait();
+            return Err("Analisi interrotta.".to_string());
+        }
+
+        // legge un gruppo di fotogrammi
+        let mut gruppo: Vec<Fotogramma> = Vec::new();
+        while gruppo.len() < per_gruppo {
+            let mut foto = Fotogramma::nuovo(info.larghezza, info.altezza);
+            if leggi_tutto(&mut entrata, &mut foto.dati[..dimensione]).is_err() {
+                break; // fine del video
+            }
+            gruppo.push(foto);
+        }
+        if gruppo.is_empty() {
+            break;
+        }
+
+        // i fotogrammi chiave ripetuti sono uguali al precedente: non serve rifare il rilevamento
+        let mut uguale_al_precedente = vec![false; gruppo.len()];
+        for i in 1..gruppo.len() {
+            uguale_al_precedente[i] = gruppo[i].dati == gruppo[i - 1].dati;
+        }
+        let risultati: Vec<Option<(Riquadro, f32)>> = gruppo_core.install(|| {
+            gruppo
+                .par_iter()
+                .enumerate()
+                .map(|(i, f)| if uguale_al_precedente[i] { None } else { trova_display_con_sicurezza(f, imp) })
+                .collect()
+        });
+        for (i, r) in risultati.into_iter().enumerate() {
+            if uguale_al_precedente[i] {
+                let precedente = *trovati.last().unwrap();
+                trovati.push(precedente);
+            } else {
+                trovati.push(r);
+            }
+        }
+
+        stati = stati_copertura(&trovati);
+        avanzamento(&stati, totali.max(stati.len()));
+    }
+    let _ = lettore.wait();
+
+    if trovati.is_empty() {
+        return Err("Non riesco a leggere il video per l'analisi.".to_string());
+    }
+    Ok(stati)
+}
+
+/// Da (riquadro, sicurezza) a verde / arancione / rosso.
+/// Un punto è arancione anche se il display "salta" lontano rispetto
+/// ai punti prima e dopo (probabile riflesso).
+pub fn stati_copertura(trovati: &[Option<(Riquadro, f32)>]) -> Vec<u8> {
+    let mut stati = Vec::new();
+    for i in 0..trovati.len() {
+        let Some((riquadro, sicurezza)) = trovati[i] else {
+            stati.push(NON_TROVATO);
+            continue;
+        };
+        let mut stato = if sicurezza < SICUREZZA_MINIMA { INCERTO } else { TROVATO };
+
+        // salto: lontano sia dal punto prima sia da quello dopo
+        let prima = if i > 0 { trovati[i - 1] } else { None };
+        let dopo = trovati.get(i + 1).copied().flatten();
+        if let (Some((a, _)), Some((b, _))) = (prima, dopo) {
+            if !vicini(a, riquadro) && !vicini(b, riquadro) {
+                stato = INCERTO;
+            }
+        }
+        stati.push(stato);
+    }
+    stati
 }

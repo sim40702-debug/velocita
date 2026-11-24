@@ -273,12 +273,135 @@ button {
   object-fit: contain;
 }
 
+/* la "tela" con immagine e zona: si ingrandisce quando regoli la zona */
+.tela {
+  --scala: 1;
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  transition: transform 0.25s ease;
+}
+
 /* la zona che verrà coperta */
 .zona-rossa {
   position: absolute;
   border: 1.5px dashed var(--accento);
   background: rgba(226, 105, 11, 0.1);
   pointer-events: none;
+}
+
+/* ---------- REGOLA LA ZONA A MANO ---------- */
+
+/* le maniglie si vedono solo mentre regoli */
+.maniglia {
+  display: none;
+  position: absolute;
+  width: calc(10px / var(--scala));
+  height: calc(10px / var(--scala));
+  margin: calc(-5px / var(--scala)) 0 0 calc(-5px / var(--scala));
+  border: calc(1.5px / var(--scala)) solid var(--accento);
+  border-radius: calc(2px / var(--scala));
+  background: #fff;
+}
+
+.maniglia[data-lato="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.maniglia[data-lato="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.maniglia[data-lato="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.maniglia[data-lato="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.maniglia[data-lato="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.maniglia[data-lato="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.maniglia[data-lato="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+.maniglia[data-lato="w"] { left: 0; top: 50%; cursor: ew-resize; }
+
+.regolazione-aperta .zona-rossa {
+  touch-action: none;
+  border: calc(2px / var(--scala)) solid var(--accento);
+  background: rgba(226, 105, 11, 0.14);
+  pointer-events: auto;
+  cursor: move;
+}
+
+.regolazione-aperta .maniglia {
+  display: block;
+}
+
+.regolazione-aperta .info-anteprima {
+  display: none;
+}
+
+.barra-regola {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  border-radius: 8px;
+  background: rgba(24, 23, 22, 0.92);
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.bottone.scuro {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 500;
+}
+
+.bottone.scuro:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* mentre regoli, cursore, striscia e pannello sono fermi */
+.regolazione-aperta #cursore-anteprima,
+.regolazione-aperta .striscia,
+.regolazione-aperta .pannello {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ---------- STRISCIA COLORATA ---------- */
+
+.striscia {
+  display: flex;
+  align-items: center;
+  height: 12px;
+  margin-top: -4px;
+  cursor: pointer;
+}
+
+.striscia canvas {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.legenda {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-height: 16px;
+  margin-top: -4px;
+  color: var(--testo-2);
+  font-size: 12px;
+}
+
+.legenda span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legenda i {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
 }
 
 .anteprima-messaggio {

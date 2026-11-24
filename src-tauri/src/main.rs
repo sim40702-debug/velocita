@@ -6,17 +6,21 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use motore::rilevamento::{ColoreDisplay, Impostazioni, Momento, Riquadro};
+use motore::rilevamento::{ColoreDisplay, Impostazioni, Momento, Regolazione, Riquadro};
 use motore::video::{self, Esito};
 
 // diventa true quando l'utente preme "Interrompi"
 static ANNULLA: AtomicBool = AtomicBool::new(false);
+
+// l'analisi per la striscia colorata in corso (per poterla fermare)
+static ANALISI_IN_CORSO: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
 
 // ==========================================
 // FFMPEG INCLUSO NELL'APP
@@ -47,6 +51,17 @@ struct SceltaDisplay {
     rgb: [u8; 3],
     /// "basso" o "ovunque": dove cercare il display
     posizione: String,
+    /// zona spostata o ingrandita a mano (manca = nessuna regolazione)
+    regolazione: Option<RegolazioneFinestra>,
+}
+
+/// La regolazione della zona come arriva dalla finestra.
+#[derive(Deserialize)]
+struct RegolazioneFinestra {
+    dx: f32,
+    dy: f32,
+    larghezza: f32,
+    altezza: f32,
 }
 
 fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) -> Impostazioni {
@@ -57,6 +72,10 @@ fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) 
         momento: Momento::da_nome(&display.momento),
         colore: ColoreDisplay::da_nome(&display.colore, display.rgb),
         ovunque: display.posizione == "ovunque",
+        regolazione: match &display.regolazione {
+            Some(r) => Regolazione { dx: r.dx, dy: r.dy, larghezza: r.larghezza, altezza: r.altezza },
+            None => Regolazione::nessuna(),
+        },
     }
 }
 
@@ -105,7 +124,10 @@ struct Zona {
 #[derive(Serialize)]
 struct RispostaAnteprima {
     immagine: String,
+    /// la zona che verrà coperta (con la regolazione)
     zona: Option<Zona>,
+    /// la zona automatica, senza regolazione (serve per regolarla)
+    zona_base: Option<Zona>,
     /// "giorno" o "notte": quello usato per questo fotogramma
     momento: String,
 }
@@ -146,8 +168,9 @@ async fn anteprima(
         );
 
         let zona = a.zona_coperta.map(|r| in_percentuale(r, larghezza, altezza));
+        let zona_base = a.zona_base.map(|r| in_percentuale(r, larghezza, altezza));
         let momento = if a.momento == Momento::Giorno { "giorno" } else { "notte" };
-        Ok(RispostaAnteprima { immagine, zona, momento: momento.to_string() })
+        Ok(RispostaAnteprima { immagine, zona, zona_base, momento: momento.to_string() })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -156,6 +179,79 @@ async fn anteprima(
 // ==========================================
 // ELABORAZIONE
 // ==========================================
+
+// ==========================================
+// ANALISI PER LA STRISCIA COLORATA
+// ==========================================
+
+#[derive(Serialize, Clone)]
+struct Copertura {
+    /// il video analizzato (la finestra ignora i risultati di altri video)
+    percorso: String,
+    /// un numero per punto: 0 rosso, 1 arancione, 2 verde
+    stati: Vec<u8>,
+    /// quanti punti avrà alla fine
+    totali: usize,
+    finito: bool,
+}
+
+/// Ferma l'analisi in corso, se c'è.
+fn ferma_analisi() {
+    if let Ok(mut in_corso) = ANALISI_IN_CORSO.lock() {
+        if let Some(annulla) = in_corso.take() {
+            annulla.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Controlla velocemente il video in sottofondo e manda alla finestra
+/// i risultati mano a mano (evento "copertura").
+#[tauri::command]
+async fn analizza(app: AppHandle, percorso: String, display: SceltaDisplay) -> Result<(), String> {
+    // ferma quella di prima e si segna come quella in corso
+    ferma_analisi();
+    let annulla = Arc::new(AtomicBool::new(false));
+    if let Ok(mut in_corso) = ANALISI_IN_CORSO.lock() {
+        *in_corso = Some(annulla.clone());
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let imp = impostazioni(10, 0.15, false, &display);
+        // usa metà del processore: l'app resta veloce mentre analizza
+        let worker = video::calcola_numero_worker(0.5, video::cpu_totali());
+        let mut ultimo_invio = Instant::now();
+        let risultato = video::analizza_copertura(
+            &percorso_ffmpeg(),
+            Path::new(&percorso),
+            &imp,
+            worker,
+            &annulla,
+            |stati, totali| {
+                // al massimo 5 volte al secondo
+                if ultimo_invio.elapsed().as_millis() < 200 {
+                    return;
+                }
+                ultimo_invio = Instant::now();
+                let _ = app.emit(
+                    "copertura",
+                    Copertura { percorso: percorso.clone(), stati: stati.to_vec(), totali, finito: false },
+                );
+            },
+        );
+        match risultato {
+            Ok(stati) => {
+                let totali = stati.len();
+                let _ = app.emit("copertura", Copertura { percorso: percorso.clone(), stati, totali, finito: true });
+                Ok(())
+            }
+            // fermata perché è partita un'altra analisi: non è un errore
+            Err(_) if annulla.load(Ordering::Relaxed) => Ok(()),
+            Err(e) => Err(e),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
 #[derive(Serialize, Clone)]
 struct Avanzamento {
@@ -203,6 +299,7 @@ async fn elabora(
     display: SceltaDisplay,
 ) -> Result<Risultato, String> {
     ANNULLA.store(false, Ordering::Relaxed);
+    ferma_analisi(); // il processore serve tutto all'esportazione
     tauri::async_runtime::spawn_blocking(move || {
         let entrata = PathBuf::from(&percorso);
         let cartella_uscita = match cartella {
@@ -284,7 +381,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![info_file, anteprima, elabora, interrompi, cpu_totali])
+        .invoke_handler(tauri::generate_handler![info_file, anteprima, elabora, interrompi, cpu_totali, analizza])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Velocità");
 }

@@ -25,6 +25,22 @@ npm run ffmpeg
 npm run dev
 ```
 
+## Striscia colorata e zona regolabile
+
+Quando apri un video, Velocità lo controlla velocemente in sottofondo
+(2 punti al secondo, solo i fotogrammi chiave) e colora la striscia sotto
+l'anteprima:
+
+- **verde**: display trovato, il numero è coperto
+- **arancione**: trovato ma con poca sicurezza (c'è un'altra zona simile, o il display "salta"): meglio controllare
+- **rosso**: display non trovato, lì il numero potrebbe vedersi
+
+Clicca sulla striscia per andare in quel punto.
+
+Con **Zona → Regola…** (o doppio clic sull'anteprima) sposti e ingrandisci a mano
+la zona coperta. La regolazione vale per tutto il video e segue il display
+anche quando si muove. **Ripristina** torna alla zona automatica.
+
 ## Scorciatoie
 
 - **⌘O** (Ctrl+O su Windows): scegli i file

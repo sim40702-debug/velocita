@@ -60,13 +60,39 @@
     <!-- 2. PRONTO -->
     <section id="schermata-pronto" class="schermata due-colonne nascosto">
       <div class="area">
-        <div class="anteprima">
-          <img id="anteprima-img" alt="Anteprima">
-          <div id="anteprima-zona" class="zona-rossa nascosto"></div>
+        <div id="anteprima" class="anteprima">
+          <!-- la "tela" si ingrandisce sul display quando regoli la zona -->
+          <div id="anteprima-tela" class="tela">
+            <img id="anteprima-img" alt="Anteprima">
+            <div id="anteprima-zona" class="zona-rossa nascosto">
+              <span class="maniglia" data-lato="nw"></span>
+              <span class="maniglia" data-lato="n"></span>
+              <span class="maniglia" data-lato="ne"></span>
+              <span class="maniglia" data-lato="e"></span>
+              <span class="maniglia" data-lato="se"></span>
+              <span class="maniglia" data-lato="s"></span>
+              <span class="maniglia" data-lato="sw"></span>
+              <span class="maniglia" data-lato="w"></span>
+            </div>
+          </div>
           <div id="anteprima-carico" class="anteprima-messaggio">Carico l'anteprima…</div>
           <div id="anteprima-info" class="info-anteprima nascosto"><i id="info-pallino"></i><span id="info-testo"></span></div>
+
+          <!-- comandi mentre regoli la zona -->
+          <div id="barra-regola" class="barra-regola nascosto">
+            <span>Trascina per spostare, tira gli angoli. Vale per tutto il video.</span>
+            <button id="btn-regola-ripristina" class="bottone scuro piccolo">Ripristina</button>
+            <button id="btn-regola-annulla" class="bottone scuro piccolo">Annulla</button>
+            <button id="btn-regola-fatto" class="bottone primario piccolo">Fatto</button>
+          </div>
         </div>
         <input id="cursore-anteprima" type="range" min="0" max="1000" value="300">
+
+        <!-- striscia colorata: dove il display viene trovato nel video -->
+        <div id="striscia" class="striscia" title="Clicca per andare in quel punto">
+          <canvas id="striscia-tela"></canvas>
+        </div>
+        <div id="legenda" class="legenda"></div>
         <p id="testo-anteprima" class="nota">La zona tratteggiata è quella che verrà coperta. Sposta il cursore per controllare.</p>
       </div>
 
@@ -101,6 +127,11 @@
               <button data-valore="0.15" class="attivo">Normale</button>
               <button data-valore="0.25">Grande</button>
             </div>
+          </div>
+          <div class="riga">
+            <span>Zona</span>
+            <span id="testo-zona" class="valore">Automatica</span>
+            <button id="btn-regola" class="link">Regola…</button>
           </div>
           <p class="nota">Più forza = quadrati più grandi.</p>
         </div>

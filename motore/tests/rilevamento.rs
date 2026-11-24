@@ -135,3 +135,44 @@ fn salta_lontano_se_lo_trova_due_volte() {
     inseguitore.aggiorna(Some(riquadro(100, 200)));
     assert_eq!(inseguitore.aggiorna(Some(riquadro(100, 200))), Some(riquadro(100, 200)));
 }
+
+// ---------- la striscia colorata ----------
+
+use motore::rilevamento::{applica_regolazione, Regolazione};
+use motore::video::{stati_copertura, INCERTO, NON_TROVATO, TROVATO};
+
+#[test]
+fn striscia_verde_rossa_e_arancione() {
+    let qui = Some((riquadro(500, 800), 1.0));
+    let lontano = Some((riquadro(100, 200), 1.0));
+    let con_rivale = Some((riquadro(500, 800), 0.1));
+    let trovati = [qui, qui, None, qui, lontano, qui, con_rivale];
+    assert_eq!(
+        stati_copertura(&trovati),
+        vec![TROVATO, TROVATO, NON_TROVATO, TROVATO, INCERTO, TROVATO, INCERTO]
+    );
+}
+
+// ---------- la zona regolata a mano ----------
+
+#[test]
+fn senza_regolazione_la_zona_non_cambia() {
+    let zona = Riquadro { x: 100, y: 200, w: 60, h: 30 };
+    assert_eq!(applica_regolazione(zona, Regolazione::nessuna(), 1080, 1920), zona);
+}
+
+#[test]
+fn la_regolazione_sposta_e_ingrandisce() {
+    let zona = Riquadro { x: 100, y: 200, w: 60, h: 30 };
+    // centro spostato di mezza zona a destra (130 -> 160), più larga del 50%, alta il doppio
+    let reg = Regolazione { dx: 0.5, dy: 0.0, larghezza: 1.5, altezza: 2.0 };
+    assert_eq!(applica_regolazione(zona, reg, 1080, 1920), Riquadro { x: 115, y: 185, w: 90, h: 60 });
+}
+
+#[test]
+fn la_zona_regolata_resta_dentro_l_immagine() {
+    let zona = Riquadro { x: 1040, y: 1900, w: 40, h: 20 };
+    let reg = Regolazione { dx: 1.0, dy: 1.0, larghezza: 2.0, altezza: 2.0 };
+    let r = applica_regolazione(zona, reg, 1080, 1920);
+    assert!(r.x >= 0 && r.y >= 0 && r.x + r.w <= 1080 && r.y + r.h <= 1920);
+}

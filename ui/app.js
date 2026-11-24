@@ -148,8 +148,10 @@ function valoreUsoCpu() {
 }
 
 // le scelte del display da mandare a Rust
-function sceltaDisplay() {
+function sceltaDisplay(file) {
   return {
+    // zona spostata o ingrandita a mano per questo file (null = automatica)
+    regolazione: file && file.regolazione ? file.regolazione : null,
     momento: scelte.momento,
     colore: scelte.colore,
     rgb: scelte.coloreVideo,
@@ -229,6 +231,9 @@ async function aggiungiFile(percorsi) {
   if (alLavoro) {
     return;
   }
+  if (regolazioneAperta) {
+    chiudiRegolazione();
+  }
   // tiene solo i file con un'estensione giusta
   const validi = percorsi.filter((p) => {
     const estensione = p.split(".").pop().toLowerCase();
@@ -268,6 +273,7 @@ async function aggiungiFile(percorsi) {
   aggiornaSchedaFile();
   mostraSchermata("pronto");
   caricaAnteprima();
+  analizzaSeServe();
 }
 
 // ==========================================
@@ -293,6 +299,9 @@ function aggiornaSchedaFile() {
   }
   $("testo-riepilogo").textContent = riepilogo;
   $("barra-sottotitolo").textContent = testoCoda();
+
+  $("testo-zona").textContent = primo.regolazione ? "Regolata a mano" : "Automatica";
+  disegnaStriscia();
 
   $("nome-cartella").textContent = scelte.cartella ? nomeDaPercorso(scelte.cartella) : "Accanto al video";
   $("btn-reset-cartella").classList.toggle("nascosto", !scelte.cartella);
@@ -327,6 +336,7 @@ function disegnaCoda() {
       indiceAnteprima = i;
       aggiornaSchedaFile();
       caricaAnteprima();
+      analizzaSeServe();
     });
     lista.appendChild(riga);
   });
@@ -340,6 +350,7 @@ function togliDallaCoda(indice) {
   }
   indiceAnteprima = Math.min(indiceAnteprima, coda.length - 1);
   aggiornaSchedaFile();
+  analizzaSeServe();
   caricaAnteprima();
 }
 
@@ -349,19 +360,26 @@ function posizionaZona(img, zonaDiv, zona) {
     zonaDiv.classList.add("nascosto");
     return;
   }
-  // l'immagine è "contain": calcolo dove finisce davvero dentro il riquadro nero
-  const box = img.getBoundingClientRect();
-  const scala = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+  const g = geometriaImmagine(img);
+  zonaDiv.style.left = g.sinistra + zona.x * g.larghezza + "px";
+  zonaDiv.style.top = g.sopra + zona.y * g.altezza + "px";
+  zonaDiv.style.width = zona.w * g.larghezza + "px";
+  zonaDiv.style.height = zona.h * g.altezza + "px";
+  zonaDiv.classList.remove("nascosto");
+}
+
+// l'immagine è "contain": dove finisce davvero dentro il riquadro nero.
+// Usa clientWidth (la grandezza senza l'ingrandimento della regolazione).
+function geometriaImmagine(img) {
+  const scala = Math.min(img.clientWidth / img.naturalWidth, img.clientHeight / img.naturalHeight);
   const larghezza = img.naturalWidth * scala;
   const altezza = img.naturalHeight * scala;
-  const sinistra = (box.width - larghezza) / 2;
-  const sopra = (box.height - altezza) / 2;
-
-  zonaDiv.style.left = sinistra + zona.x * larghezza + "px";
-  zonaDiv.style.top = sopra + zona.y * altezza + "px";
-  zonaDiv.style.width = zona.w * larghezza + "px";
-  zonaDiv.style.height = zona.h * altezza + "px";
-  zonaDiv.classList.remove("nascosto");
+  return {
+    sinistra: (img.clientWidth - larghezza) / 2,
+    sopra: (img.clientHeight - altezza) / 2,
+    larghezza: larghezza,
+    altezza: altezza,
+  };
 }
 
 let ultimaAnteprima = null;
@@ -384,7 +402,7 @@ async function caricaAnteprima() {
       posizione: posizione,
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
-      display: sceltaDisplay(),
+      display: sceltaDisplay(file),
     });
     if (mioNumero !== numeroAnteprima) {
       return; // nel frattempo è stata chiesta un'altra anteprima
@@ -446,7 +464,7 @@ async function avvia() {
         forza: Number(scelte.forza),
         margine: Number(scelte.margine),
         debug: $("interruttore-prova").checked,
-        display: sceltaDisplay(),
+        display: sceltaDisplay(file),
       });
 
       if (risultato.interrotto) {
@@ -471,6 +489,7 @@ async function avvia() {
   if (interrotto) {
     mostraSchermata("pronto");
     caricaAnteprima();
+    analizzaSeServe();
     return;
   }
   mostraFinito(secondiTotali);
@@ -535,7 +554,7 @@ function preparaSchermataCorso(file, indice) {
       posizione: 0.3,
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
-      display: sceltaDisplay(),
+      display: sceltaDisplay(file),
     })
       .then((r) => {
         if (fileInCorso !== indice) {
@@ -782,9 +801,16 @@ async function installaAggiornamento() {
 // ==========================================
 
 let schermataPrimaImpostazioni = "inizio";
+// le scelte del display quando si aprono le impostazioni (per vedere se cambiano)
+let displayPrimaImpostazioni = "";
+
+// le scelte che cambiano il risultato dell'analisi, scritte come testo
+function sceltePerAnalisi() {
+  return JSON.stringify([scelte.momento, scelte.colore, scelte.coloreVideo, scelte.posizione]);
+}
 
 function apriImpostazioni() {
-  if (alLavoro || !$("schermata-impostazioni").classList.contains("nascosto") || !$("schermata-scegli").classList.contains("nascosto")) {
+  if (alLavoro || regolazioneAperta || !$("schermata-impostazioni").classList.contains("nascosto") || !$("schermata-scegli").classList.contains("nascosto")) {
     return;
   }
   for (const s of ["inizio", "pronto", "finito"]) {
@@ -793,6 +819,7 @@ function apriImpostazioni() {
     }
   }
   $("btn-controlla").textContent = "Controlla ora";
+  displayPrimaImpostazioni = sceltePerAnalisi();
   mostraSchermata("impostazioni");
 }
 
@@ -806,9 +833,311 @@ function mostraSezioneImpostazioni(nome) {
 
 function chiudiImpostazioni() {
   mostraSchermata(schermataPrimaImpostazioni);
+  if (sceltePerAnalisi() !== displayPrimaImpostazioni) {
+    // il display si cerca in un altro modo: le strisce vecchie non valgono più
+    for (const f of coda) {
+      f.copertura = null;
+    }
+    analisiInCorso = "";
+  }
   if (schermataPrimaImpostazioni === "pronto") {
+    analizzaSeServe();
     caricaAnteprima(); // forza e margine potrebbero essere cambiati
   }
+}
+
+// ==========================================
+// STRISCIA COLORATA (analisi veloce del video)
+// ==========================================
+
+// colore di ogni stato: 0 non trovato, 1 da controllare, 2 coperto
+const COLORI_STRISCIA = ["--rosso", "--ambra", "--verde"];
+// il video che si sta analizzando adesso ("" = nessuno)
+let analisiInCorso = "";
+
+// fa partire l'analisi del file mostrato, se non c'è già
+function analizzaSeServe() {
+  const file = coda[indiceAnteprima];
+  if (!file || file.foto) {
+    return;
+  }
+  const giaFatta = file.copertura && file.copertura.finito;
+  if (giaFatta || analisiInCorso === file.percorso) {
+    return;
+  }
+  analisiInCorso = file.percorso;
+  file.copertura = { stati: [], totali: 1, finito: false };
+  disegnaStriscia();
+  invoke("analizza", { percorso: file.percorso, display: sceltaDisplay(file) })
+    .catch((errore) => {
+      file.copertura = { stati: [], totali: 1, finito: true, errore: String(errore) };
+      disegnaStriscia();
+    })
+    .finally(() => {
+      if (analisiInCorso === file.percorso) {
+        analisiInCorso = "";
+      }
+    });
+}
+
+// arriva da Rust mentre analizza
+tauri.event.listen("copertura", (evento) => {
+  const c = evento.payload;
+  const file = coda.find((f) => f.percorso === c.percorso);
+  if (!file) {
+    return;
+  }
+  file.copertura = { stati: c.stati, totali: c.totali, finito: c.finito };
+  if (file === coda[indiceAnteprima]) {
+    disegnaStriscia();
+  }
+});
+
+// il valore di un colore del CSS, es. "--verde" -> "#2e8b57"
+function coloreCss(nome) {
+  return getComputedStyle(document.documentElement).getPropertyValue(nome).trim();
+}
+
+// quanti tratti di fila hanno questo stato (es. 2 tratti rossi)
+function contaTratti(stati, stato) {
+  let tratti = 0;
+  for (let i = 0; i < stati.length; i++) {
+    if (stati[i] === stato && (i === 0 || stati[i - 1] !== stato)) {
+      tratti++;
+    }
+  }
+  return tratti;
+}
+
+// "1 tratto", "3 tratti"
+function testoTratti(numero) {
+  return numero === 1 ? "1 tratto" : numero + " tratti";
+}
+
+function disegnaStriscia() {
+  const file = coda[indiceAnteprima];
+  const nascondi = !file || file.foto;
+  $("striscia").classList.toggle("nascosto", nascondi);
+  $("legenda").classList.toggle("nascosto", nascondi);
+  if (nascondi) {
+    return;
+  }
+
+  // la tela va disegnata alla risoluzione dello schermo (Retina)
+  const tela = $("striscia-tela");
+  const larghezza = tela.clientWidth;
+  const altezza = tela.clientHeight;
+  const densita = window.devicePixelRatio || 1;
+  tela.width = Math.round(larghezza * densita);
+  tela.height = Math.round(altezza * densita);
+  const ctx = tela.getContext("2d");
+  ctx.scale(densita, densita);
+
+  // sfondo grigio: la parte non ancora analizzata
+  ctx.fillStyle = coloreCss("--controllo-sopra");
+  ctx.fillRect(0, 0, larghezza, altezza);
+
+  const c = file.copertura;
+  if (!c) {
+    $("legenda").innerHTML = "";
+    return;
+  }
+  const passo = larghezza / Math.max(c.totali, c.stati.length);
+  c.stati.forEach((stato, i) => {
+    ctx.fillStyle = coloreCss(COLORI_STRISCIA[stato]);
+    ctx.fillRect(i * passo, 0, passo + 0.5, altezza);
+  });
+
+  // la scritta sotto
+  const legenda = $("legenda");
+  if (c.errore) {
+    legenda.textContent = "Analisi non riuscita: " + c.errore;
+    return;
+  }
+  if (!c.finito) {
+    const percentuale = Math.floor((c.stati.length / Math.max(1, c.totali)) * 100);
+    legenda.textContent = "Analisi del video… " + percentuale + "%";
+    return;
+  }
+  const incerti = contaTratti(c.stati, 1);
+  const mancanti = contaTratti(c.stati, 0);
+  const pezzi = [];
+  if (incerti === 0 && mancanti === 0) {
+    pezzi.push('<span><i style="background:var(--verde)"></i>Display trovato in tutto il video</span>');
+  } else {
+    pezzi.push('<span><i style="background:var(--verde)"></i>Coperto</span>');
+    if (incerti > 0) {
+      pezzi.push('<span><i style="background:var(--ambra)"></i>Da controllare · ' + testoTratti(incerti) + "</span>");
+    }
+    if (mancanti > 0) {
+      pezzi.push('<span><i style="background:var(--rosso)"></i>Non trovato · ' + testoTratti(mancanti) + "</span>");
+    }
+    pezzi.push("<span>Clicca sulla striscia per andarci</span>");
+  }
+  legenda.innerHTML = pezzi.join("");
+}
+
+// clic sulla striscia: l'anteprima va in quel punto del video
+function cliccaStriscia(evento) {
+  const box = $("striscia").getBoundingClientRect();
+  const posizione = Math.min(1, Math.max(0, (evento.clientX - box.left) / box.width));
+  $("cursore-anteprima").value = Math.round(posizione * 1000);
+  caricaAnteprima();
+}
+
+// ==========================================
+// REGOLA LA ZONA A MANO
+// ==========================================
+
+let regolazioneAperta = false;
+// la zona mentre la regoli: x, y, w, h da 0 a 1 (rispetto all'immagine)
+let zonaInModifica = null;
+// cosa si sta trascinando (null = niente)
+let trascinamento = null;
+// quanto è ingrandita l'anteprima
+let scalaTela = 1;
+
+function apriRegolazione() {
+  if (regolazioneAperta) {
+    return;
+  }
+  if (!ultimaAnteprima || !ultimaAnteprima.zona_base) {
+    $("testo-anteprima").textContent =
+      "Qui il display non viene trovato: sposta il cursore su un punto verde della striscia, poi premi «Regola…».";
+    return;
+  }
+  regolazioneAperta = true;
+  zonaInModifica = Object.assign({}, ultimaAnteprima.zona);
+  $("schermata-pronto").classList.add("regolazione-aperta");
+  $("barra-regola").classList.remove("nascosto");
+  aggiornaZonaInModifica();
+  ingrandisciSullaZona();
+}
+
+function chiudiRegolazione() {
+  regolazioneAperta = false;
+  trascinamento = null;
+  $("schermata-pronto").classList.remove("regolazione-aperta");
+  $("barra-regola").classList.add("nascosto");
+  scalaTela = 1;
+  $("anteprima-tela").style.transform = "";
+  $("anteprima-tela").style.setProperty("--scala", 1);
+  if (ultimaAnteprima) {
+    posizionaZona($("anteprima-img"), $("anteprima-zona"), ultimaAnteprima.zona);
+  }
+}
+
+// "Fatto": salva lo spostamento e la grandezza rispetto alla zona automatica
+function confermaRegolazione() {
+  const file = coda[indiceAnteprima];
+  const base = ultimaAnteprima.zona_base;
+  const z = zonaInModifica;
+  file.regolazione = {
+    dx: (z.x + z.w / 2 - (base.x + base.w / 2)) / base.w,
+    dy: (z.y + z.h / 2 - (base.y + base.h / 2)) / base.h,
+    larghezza: z.w / base.w,
+    altezza: z.h / base.h,
+  };
+  chiudiRegolazione();
+  aggiornaSchedaFile();
+  caricaAnteprima();
+}
+
+// "Ripristina": torna alla zona automatica
+function ripristinaRegolazione() {
+  coda[indiceAnteprima].regolazione = null;
+  chiudiRegolazione();
+  aggiornaSchedaFile();
+  caricaAnteprima();
+}
+
+function aggiornaZonaInModifica() {
+  posizionaZona($("anteprima-img"), $("anteprima-zona"), zonaInModifica);
+}
+
+// ingrandisce l'anteprima sulla zona, così si regola con precisione
+function ingrandisciSullaZona() {
+  const img = $("anteprima-img");
+  const g = geometriaImmagine(img);
+  const z = zonaInModifica;
+  const larghezzaZona = z.w * g.larghezza;
+  const altezzaZona = z.h * g.altezza;
+  // centro della zona dentro la tela
+  const centroX = g.sinistra + (z.x + z.w / 2) * g.larghezza;
+  const centroY = g.sopra + (z.y + z.h / 2) * g.altezza;
+
+  // la zona deve occupare circa un terzo dell'anteprima (al massimo 4 volte più grande)
+  let scala = (Math.min(img.clientWidth, img.clientHeight) * 0.3) / Math.max(larghezzaZona, altezzaZona);
+  scala = Math.min(4, Math.max(1, scala));
+  // sposta in modo che la zona finisca al centro (un po' più in alto, sopra la barra)
+  const spostaX = img.clientWidth / 2 - scala * centroX;
+  const spostaY = img.clientHeight / 2 - 20 - scala * centroY;
+
+  scalaTela = scala;
+  $("anteprima-tela").style.transform = "translate(" + spostaX + "px, " + spostaY + "px) scale(" + scala + ")";
+  $("anteprima-tela").style.setProperty("--scala", scala);
+}
+
+// inizia a trascinare la zona o una maniglia
+function iniziaTrascinamento(evento) {
+  if (!regolazioneAperta) {
+    return;
+  }
+  evento.preventDefault();
+  const maniglia = evento.target.closest(".maniglia");
+  trascinamento = {
+    lato: maniglia ? maniglia.dataset.lato : "sposta",
+    x: evento.clientX,
+    y: evento.clientY,
+    zona: Object.assign({}, zonaInModifica),
+  };
+  $("anteprima-zona").setPointerCapture(evento.pointerId);
+}
+
+function trascina(evento) {
+  if (!trascinamento) {
+    return;
+  }
+  const g = geometriaImmagine($("anteprima-img"));
+  // spostamento del mouse, da pixel dello schermo a "parte dell'immagine"
+  const dx = (evento.clientX - trascinamento.x) / scalaTela / g.larghezza;
+  const dy = (evento.clientY - trascinamento.y) / scalaTela / g.altezza;
+  const lato = trascinamento.lato;
+  let x = trascinamento.zona.x;
+  let y = trascinamento.zona.y;
+  let w = trascinamento.zona.w;
+  let h = trascinamento.zona.h;
+  const minimo = 0.01;
+
+  if (lato === "sposta") {
+    // tutta la zona, senza uscire dall'immagine
+    x = Math.min(1 - w, Math.max(0, x + dx));
+    y = Math.min(1 - h, Math.max(0, y + dy));
+  } else {
+    // un lato o un angolo: "nw" = in alto a sinistra, "se" = in basso a destra...
+    if (lato.includes("w")) {
+      const nuovaX = Math.min(x + w - minimo, Math.max(0, x + dx));
+      w = w + (x - nuovaX);
+      x = nuovaX;
+    }
+    if (lato.includes("e")) {
+      w = Math.min(1 - x, Math.max(minimo, w + dx));
+    }
+    if (lato.includes("n")) {
+      const nuovaY = Math.min(y + h - minimo, Math.max(0, y + dy));
+      h = h + (y - nuovaY);
+      y = nuovaY;
+    }
+    if (lato.includes("s")) {
+      h = Math.min(1 - y, Math.max(minimo, h + dy));
+    }
+  }
+  zonaInModifica = { x: x, y: y, w: w, h: h };
+  aggiornaZonaInModifica();
+}
+
+function fineTrascinamento() {
+  trascinamento = null;
 }
 
 // ==========================================
@@ -864,7 +1193,7 @@ async function caricaFotogrammaScegli() {
       posizione: Number($("cursore-scegli").value) / 1000,
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
-      display: sceltaDisplay(),
+      display: sceltaDisplay(coda[indiceAnteprima]),
     });
     $("scegli-img").src = risposta.immagine;
     $("scegli-mirino").classList.add("nascosto");
@@ -1011,6 +1340,21 @@ async function avvio() {
   });
   $("btn-avvia").addEventListener("click", avvia);
 
+  // striscia colorata
+  $("striscia").addEventListener("click", cliccaStriscia);
+  new ResizeObserver(disegnaStriscia).observe($("striscia"));
+
+  // regola la zona a mano
+  $("btn-regola").addEventListener("click", apriRegolazione);
+  $("anteprima").addEventListener("dblclick", apriRegolazione);
+  $("btn-regola-fatto").addEventListener("click", confermaRegolazione);
+  $("btn-regola-annulla").addEventListener("click", chiudiRegolazione);
+  $("btn-regola-ripristina").addEventListener("click", ripristinaRegolazione);
+  $("anteprima-zona").addEventListener("pointerdown", iniziaTrascinamento);
+  $("anteprima-zona").addEventListener("pointermove", trascina);
+  $("anteprima-zona").addEventListener("pointerup", fineTrascinamento);
+  $("anteprima-zona").addEventListener("pointercancel", fineTrascinamento);
+
   // schermata 3
   $("btn-interrompi").addEventListener("click", interrompi);
   $("btn-dettagli").addEventListener("click", () => {
@@ -1110,6 +1454,10 @@ async function avvio() {
     } else if (comando && evento.key === ",") {
       evento.preventDefault();
       apriImpostazioni();
+    } else if (evento.key === "Escape" && regolazioneAperta) {
+      chiudiRegolazione();
+    } else if (evento.key === "Enter" && regolazioneAperta) {
+      confermaRegolazione();
     } else if (evento.key === "Escape") {
       if (!$("schermata-impostazioni").classList.contains("nascosto")) {
         chiudiImpostazioni();
@@ -1122,7 +1470,10 @@ async function avvio() {
   // se l'anteprima cambia grandezza (finestra ridimensionata, avviso che
   // compare o sparisce), la zona tratteggiata va rimessa a posto
   const osservatore = new ResizeObserver(() => {
-    if (ultimaAnteprima) {
+    if (regolazioneAperta) {
+      aggiornaZonaInModifica();
+      ingrandisciSullaZona();
+    } else if (ultimaAnteprima) {
       posizionaZona($("anteprima-img"), $("anteprima-zona"), ultimaAnteprima.zona);
     }
   });

@@ -123,6 +123,25 @@ impl ColoreDisplay {
     }
 }
 
+/// Regolazione fatta a mano nell'anteprima: sposta e ingrandisce la zona coperta.
+/// I valori sono in proporzione alla zona: dx = 0.1 vuol dire spostata a destra
+/// di un decimo della sua larghezza, larghezza = 1.2 vuol dire più larga del 20%.
+/// Così vale in tutti i fotogrammi, anche quando il display si muove.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Regolazione {
+    pub dx: f32,
+    pub dy: f32,
+    pub larghezza: f32,
+    pub altezza: f32,
+}
+
+impl Regolazione {
+    /// Nessuna regolazione: la zona resta quella automatica.
+    pub fn nessuna() -> Regolazione {
+        Regolazione { dx: 0.0, dy: 0.0, larghezza: 1.0, altezza: 1.0 }
+    }
+}
+
 /// Le scelte dell'utente che cambiano la copertura.
 #[derive(Clone, Copy, Debug)]
 pub struct Impostazioni {
@@ -139,6 +158,8 @@ pub struct Impostazioni {
     /// false = cerca il display solo nella metà bassa (consigliato),
     /// true = lo cerca in tutta l'immagine (videocamera messa altrove)
     pub ovunque: bool,
+    /// Zona spostata o ingrandita a mano (per tutto il video)
+    pub regolazione: Regolazione,
 }
 
 impl Default for Impostazioni {
@@ -150,6 +171,7 @@ impl Default for Impostazioni {
             momento: Momento::Automatico,
             colore: ColoreDisplay::da_nome("arancione", [0, 0, 0]),
             ovunque: false,
+            regolazione: Regolazione::nessuna(),
         }
     }
 }
@@ -504,6 +526,14 @@ fn punteggio_display(z: &Zona) -> f32 {
 /// Cerca il display arancione nel fotogramma. Ritorna il riquadro con il
 /// margine di sicurezza, oppure None se non lo trova.
 pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> {
+    trova_display_con_sicurezza(foto, imp).map(|(riquadro, _sicurezza)| riquadro)
+}
+
+/// Come trova_display, ma dice anche quanto è sicuro il rilevamento (da 0 a 1):
+/// - 1 = nessun'altra zona assomiglia al display
+/// - vicino a 0 = da un'altra parte c'è una zona quasi uguale (un "rivale"),
+///   quindi l'app potrebbe aver scelto quella sbagliata
+pub fn trova_display_con_sicurezza(foto: &Fotogramma, imp: &Impostazioni) -> Option<(Riquadro, f32)> {
     if foto.larghezza < 2 || foto.altezza < 2 {
         return None;
     }
@@ -521,6 +551,7 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
     let area_minima = 500.0 * SCALA_RILEVAMENTO * SCALA_RILEVAMENTO; // proporzionata alla scala ridotta
     let zone = trova_zone(&maschera, &luminosi, pw, ph);
     let mut migliore: Option<&Zona> = None;
+    let mut candidate: Vec<&Zona> = Vec::new();
     for z in &zone {
         if z.area <= area_minima || z.luminosi == 0 {
             continue;
@@ -534,6 +565,7 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
         if z.w < z.h {
             continue;
         }
+        candidate.push(z);
         if migliore.is_none() || punteggio_display(z) > punteggio_display(migliore.unwrap()) {
             migliore = Some(z);
         }
@@ -561,6 +593,16 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
         }
     }
 
+    // sicurezza: c'è un rivale lontano dal display scelto?
+    let mut rivale = 0.0;
+    for altra in &candidate {
+        let lontana = altra.x > x2 + vicino || altra.x + altra.w < x1 - vicino || altra.y > y2 + vicino || altra.y + altra.h < y1 - vicino;
+        if lontana {
+            rivale = f32::max(rivale, punteggio_display(altra));
+        }
+    }
+    let sicurezza = (1.0 - rivale / punteggio_display(z).max(0.001)).clamp(0.0, 1.0);
+
     // riporta le coordinate alla risoluzione originale
     let inv = 1.0 / SCALA_RILEVAMENTO;
     let x = (x1 as f32 * inv) as i32;
@@ -576,7 +618,7 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
     let x = 0.max(x - pad_x);
     let y = 0.max(y - pad_y);
 
-    Some(Riquadro { x, y, w: x2 - x, h: y2 - y })
+    Some((Riquadro { x, y, w: x2 - x, h: y2 - y }, sicurezza))
 }
 
 // ==========================================
@@ -584,6 +626,35 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
 // ==========================================
 
 /// Dal riquadro arancione prende solo la parte centrale, un po' più in basso.
+/// La zona che viene davvero coperta: quella automatica (regione_centrale)
+/// con la regolazione fatta a mano.
+pub fn zona_da_coprire(display: Riquadro, larghezza: usize, altezza: usize, imp: &Impostazioni) -> Riquadro {
+    let base = regione_centrale(display, larghezza, altezza);
+    applica_regolazione(base, imp.regolazione, larghezza, altezza)
+}
+
+/// Sposta e ingrandisce il riquadro, senza farlo uscire dal fotogramma.
+pub fn applica_regolazione(base: Riquadro, reg: Regolazione, larghezza: usize, altezza: usize) -> Riquadro {
+    if reg == Regolazione::nessuna() {
+        return base;
+    }
+    // centro spostato e grandezza nuova
+    let centro_x = base.x as f32 + base.w as f32 / 2.0 + reg.dx * base.w as f32;
+    let centro_y = base.y as f32 + base.h as f32 / 2.0 + reg.dy * base.h as f32;
+    let w = (base.w as f32 * reg.larghezza.clamp(0.2, 10.0)).max(2.0);
+    let h = (base.h as f32 * reg.altezza.clamp(0.2, 10.0)).max(2.0);
+
+    // dentro il fotogramma
+    let x1 = (centro_x - w / 2.0).round().max(0.0) as i32;
+    let y1 = (centro_y - h / 2.0).round().max(0.0) as i32;
+    let x2 = ((centro_x + w / 2.0).round() as i32).min(larghezza as i32);
+    let y2 = ((centro_y + h / 2.0).round() as i32).min(altezza as i32);
+    if x2 - x1 < 2 || y2 - y1 < 2 {
+        return base; // finita fuori dall'immagine: meglio quella automatica
+    }
+    Riquadro { x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
+}
+
 pub fn regione_centrale(r: Riquadro, larghezza: usize, altezza: usize) -> Riquadro {
     let (w_full, h_full) = (larghezza as i32, altezza as i32);
 
@@ -781,7 +852,7 @@ impl Inseguitore {
 
 /// Due riquadri sono vicini se i loro centri distano meno della
 /// grandezza del primo.
-fn vicini(a: Riquadro, b: Riquadro) -> bool {
+pub fn vicini(a: Riquadro, b: Riquadro) -> bool {
     let dx = (a.x + a.w / 2) - (b.x + b.w / 2);
     let dy = (a.y + a.h / 2) - (b.y + b.h / 2);
     let distanza = ((dx * dx + dy * dy) as f32).sqrt();
@@ -812,7 +883,7 @@ fn unisci(a: Riquadro, b: Riquadro) -> Riquadro {
 /// riquadro arancione da usare.
 pub fn copri(foto: &mut Fotogramma, box_display: Option<Riquadro>, imp: &Impostazioni) {
     let Some(r) = box_display else { return };
-    let centro = regione_centrale(r, foto.larghezza, foto.altezza);
+    let centro = zona_da_coprire(r, foto.larghezza, foto.altezza, imp);
     if imp.debug {
         disegna_riquadro(foto, r, [0, 255, 0]);
         disegna_riquadro(foto, centro, [255, 0, 0]);
