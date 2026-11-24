@@ -1,4 +1,4 @@
-// Rilevamento del display arancione e pixelatura del numero.
+// Rilevamento del display (arancione o del colore scelto) e pixelatura del numero.
 // Ogni funzione corrisponde a un pezzo della classe SpeedDisplayProcessor
 // della versione Python.
 
@@ -23,19 +23,114 @@ pub const SCALA_RILEVAMENTO: f32 = 0.5;
 // a coprire l'ultima posizione nota per questi frame.
 pub const PERSISTENZA_FRAME: u32 = 6;
 
+// Il display sta sempre nella parte bassa dell'immagine (sopra il manubrio).
+// Le zone arancioni con il centro più in alto (lampioni, finestre, muri
+// illuminati) non vengono considerate. 0.5 = metà dell'immagine.
+pub const ALTEZZA_MINIMA_DISPLAY: f32 = 0.5;
+
+// Le soglie per riconoscere il display, di notte e di giorno (valori da 0 a 255).
+// - saturazione_minima: quanto deve essere colorato un pixel per contare
+// - luminosita_accesa e saturazione_accesa: un pixel è "acceso" come il
+//   display se è abbastanza luminoso e di un colore carico. Di notte muri e
+//   strade illuminati dai lampioni sono luminosi ma sbiaditi.
+//   Di giorno, al sole, anche il display sembra più sbiadito.
+pub struct Soglie {
+    pub saturazione_minima: f32,
+    pub luminosita_accesa: f32,
+    pub saturazione_accesa: f32,
+}
+
+pub const SOGLIE_NOTTE: Soglie = Soglie {
+    saturazione_minima: 100.0,
+    luminosita_accesa: 150.0,
+    saturazione_accesa: 160.0,
+};
+
+pub const SOGLIE_GIORNO: Soglie = Soglie {
+    saturazione_minima: 80.0,
+    luminosita_accesa: 170.0,
+    saturazione_accesa: 110.0,
+};
+
+// Con "Automatico": se la luminosità media del fotogramma (da 0 a 255)
+// è sotto questo valore è notte, altrimenti è giorno.
+pub const LUMINOSITA_NOTTE: f32 = 90.0;
+
 // Valori di partenza delle impostazioni (le cambia l'utente nell'app)
 pub const BLOCCO_PIXEL_NORMALE: u32 = 10;
 pub const MARGINE_NORMALE: f32 = 0.15;
+
+/// Quando è stato girato il video.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Momento {
+    /// lo capisce da solo per ogni fotogramma
+    Automatico,
+    Giorno,
+    Notte,
+}
+
+impl Momento {
+    /// Dal testo che manda la finestra ("auto", "giorno", "notte").
+    pub fn da_nome(nome: &str) -> Momento {
+        match nome {
+            "giorno" => Momento::Giorno,
+            "notte" => Momento::Notte,
+            _ => Momento::Automatico,
+        }
+    }
+}
+
+/// Il colore del display da cercare.
+#[derive(Clone, Copy, Debug)]
+pub struct ColoreDisplay {
+    /// Tinta come in OpenCV, da 0 a 180:
+    /// 0 rosso, 12 arancione, 30 giallo, 60 verde, 110 blu
+    pub tinta: f32,
+    /// Quanto la tinta di un pixel si può allontanare da questa
+    pub ampiezza: f32,
+    /// true per un display bianco (senza colore)
+    pub bianco: bool,
+}
+
+impl ColoreDisplay {
+    /// Dal nome scelto nelle impostazioni. Con "video" usa il colore `rgb`
+    /// preso cliccando sul display nell'anteprima.
+    pub fn da_nome(nome: &str, rgb: [u8; 3]) -> ColoreDisplay {
+        let colore = |tinta, ampiezza| ColoreDisplay { tinta, ampiezza, bianco: false };
+        match nome {
+            "rosso" => colore(0.0, 10.0),
+            "giallo" => colore(30.0, 8.0),
+            "verde" => colore(60.0, 20.0),
+            "blu" => colore(110.0, 20.0),
+            "bianco" => ColoreDisplay { tinta: 0.0, ampiezza: 0.0, bianco: true },
+            "video" => {
+                let (h, s, _v) = hsv(rgb[0] as f32, rgb[1] as f32, rgb[2] as f32);
+                if s < 60.0 {
+                    // quasi senza colore: è un display bianco
+                    ColoreDisplay { tinta: 0.0, ampiezza: 0.0, bianco: true }
+                } else {
+                    colore(h, 15.0)
+                }
+            }
+            // arancione: tinta da 0 a 25, come la versione Python
+            _ => colore(12.5, 12.5),
+        }
+    }
+}
 
 /// Le scelte dell'utente che cambiano la copertura.
 #[derive(Clone, Copy, Debug)]
 pub struct Impostazioni {
     /// Dimensione dei "blocchi" della pixelatura: più alto = più illeggibile
     pub blocco_pixel: u32,
-    /// Margine di sicurezza attorno alla zona arancione (0.15 = 15%)
+    /// Margine di sicurezza attorno alla zona del display (0.15 = 15%)
     pub margine: f32,
     /// Modalità prova: disegna i riquadri invece di pixelare
     pub debug: bool,
+    /// Giorno, notte o automatico
+    pub momento: Momento,
+    /// Il colore del display
+    pub colore: ColoreDisplay,
 }
 
 impl Default for Impostazioni {
@@ -44,6 +139,8 @@ impl Default for Impostazioni {
             blocco_pixel: BLOCCO_PIXEL_NORMALE,
             margine: MARGINE_NORMALE,
             debug: false,
+            momento: Momento::Automatico,
+            colore: ColoreDisplay::da_nome("arancione", [0, 0, 0]),
         }
     }
 }
@@ -76,22 +173,19 @@ impl Fotogramma {
 }
 
 // ==========================================
-// 1. TROVA IL DISPLAY ARANCIONE
+// 1. TROVA IL DISPLAY
 // ==========================================
 
-/// Converte un pixel RGB in HSV come fa OpenCV (H da 0 a 180, S e V da 0 a 255)
-/// e dice se è arancione: H tra 0 e 25, S e V almeno 100.
-fn e_arancione(r: f32, g: f32, b: f32) -> bool {
+/// Converte un pixel RGB in HSV come fa OpenCV:
+/// tinta (H) da 0 a 180, saturazione (S) e luminosità (V) da 0 a 255.
+fn hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let v = r.max(g).max(b);
     let minimo = r.min(g).min(b);
     let differenza = v - minimo;
 
-    if v.round() < 100.0 {
-        return false;
-    }
     let s = if v > 0.0 { 255.0 * differenza / v } else { 0.0 };
-    if s.round() < 100.0 {
-        return false;
+    if differenza == 0.0 {
+        return (0.0, s.round(), v.round()); // grigio: la tinta non conta
     }
 
     let mut h = if v == r {
@@ -104,18 +198,45 @@ fn e_arancione(r: f32, g: f32, b: f32) -> bool {
     if h < 0.0 {
         h += 360.0;
     }
-    let h = (h / 2.0).round();
-    h <= 25.0
+    ((h / 2.0).round(), s.round(), v.round())
 }
 
-/// Crea la maschera degli arancioni sul fotogramma rimpicciolito a metà.
-/// Ritorna (maschera, larghezza, altezza): 1 = arancione, 0 = no.
-fn maschera_arancione(foto: &Fotogramma) -> (Vec<u8>, usize, usize) {
+/// Distanza tra due tinte. Il cerchio dei colori si chiude:
+/// 178 (rosso) e 2 (rosso) sono vicine.
+fn distanza_tinta(a: f32, b: f32) -> f32 {
+    let d = (a - b).abs();
+    d.min(180.0 - d)
+}
+
+/// Dice se un pixel ha il colore del display (prima cosa)
+/// e se è "acceso" come il display (seconda cosa).
+fn e_del_colore(h: f32, s: f32, v: f32, colore: &ColoreDisplay, soglie: &Soglie) -> (bool, bool) {
+    if colore.bianco {
+        // bianco: niente colore, solo molto luminoso
+        let del_colore = v >= 180.0 && s <= 60.0;
+        let acceso = v >= 230.0 && s <= 40.0;
+        return (del_colore, acceso);
+    }
+    let del_colore = v >= 100.0
+        && s >= soglie.saturazione_minima
+        && distanza_tinta(h, colore.tinta) <= colore.ampiezza;
+    let acceso = del_colore && v >= soglie.luminosita_accesa && s >= soglie.saturazione_accesa;
+    (del_colore, acceso)
+}
+
+/// Crea la maschera del colore del display sul fotogramma rimpicciolito a metà.
+/// Ritorna (maschera, luminosi, larghezza, altezza): nella maschera 1 = del colore,
+/// in luminosi 1 = acceso, luminoso e carico (come il display).
+fn maschera_colore(foto: &Fotogramma, imp: &Impostazioni) -> (Vec<u8>, Vec<u8>, usize, usize) {
     // stessa dimensione che usa OpenCV con fx = fy = 0.5
     let pw = ((foto.larghezza as f32) * SCALA_RILEVAMENTO).round() as usize;
     let ph = ((foto.altezza as f32) * SCALA_RILEVAMENTO).round() as usize;
     let mut maschera = vec![0u8; pw * ph];
+    let mut luminosi = vec![0u8; pw * ph];
 
+    // 1) rimpicciolisce il fotogramma e calcola la luminosità media
+    let mut piccola = vec![(0.0f32, 0.0f32, 0.0f32); pw * ph]; // (h, s, v) di ogni pixel
+    let mut somma_luminosita = 0.0;
     for y in 0..ph {
         // le due righe del fotogramma grande che finiscono in questa riga
         let y1 = (y * 2).min(foto.altezza - 1);
@@ -137,12 +258,37 @@ fn maschera_arancione(foto: &Fotogramma) -> (Vec<u8>, usize, usize) {
             let g = ((somma[1] + 2) / 4) as f32;
             let b = ((somma[2] + 2) / 4) as f32;
 
-            if e_arancione(r, g, b) {
-                maschera[y * pw + x] = 1;
-            }
+            let (h, s, v) = hsv(r, g, b);
+            piccola[y * pw + x] = (h, s, v);
+            somma_luminosita += v;
         }
     }
-    (maschera, pw, ph)
+
+    // 2) sceglie le soglie: giorno o notte
+    let momento = if imp.momento == Momento::Automatico {
+        let media = somma_luminosita / (pw * ph).max(1) as f32;
+        if media < LUMINOSITA_NOTTE {
+            Momento::Notte
+        } else {
+            Momento::Giorno
+        }
+    } else {
+        imp.momento
+    };
+    let soglie = if momento == Momento::Notte { &SOGLIE_NOTTE } else { &SOGLIE_GIORNO };
+
+    // 3) segna i pixel del colore del display e quelli accesi
+    for i in 0..pw * ph {
+        let (h, s, v) = piccola[i];
+        let (del_colore, acceso) = e_del_colore(h, s, v, &imp.colore, soglie);
+        if del_colore {
+            maschera[i] = 1;
+        }
+        if acceso {
+            luminosi[i] = 1;
+        }
+    }
+    (maschera, luminosi, pw, ph)
 }
 
 /// Allarga (dilata) o restringe (erode) la maschera con un quadrato 5x5.
@@ -193,9 +339,11 @@ fn dilata_o_erodi(maschera: &[u8], w: usize, h: usize, dilata: bool) -> Vec<u8> 
     risultato
 }
 
-/// Una zona arancione unita: area (come cv2.contourArea) e rettangolo.
+/// Una zona arancione unita: area (come cv2.contourArea), quanti pixel
+/// molto luminosi ha e rettangolo.
 struct Zona {
     area: f32,
+    luminosi: u32,
     x: i32,
     y: i32,
     w: i32,
@@ -204,7 +352,7 @@ struct Zona {
 
 /// Trova le zone arancioni unite (pixel che si toccano anche in diagonale,
 /// come i contorni esterni di OpenCV) e calcola area e rettangolo.
-fn trova_zone(maschera: &[u8], w: usize, h: usize) -> Vec<Zona> {
+fn trova_zone(maschera: &[u8], luminosi: &[u8], w: usize, h: usize) -> Vec<Zona> {
     let mut visto = vec![false; w * h];
     let mut zone = Vec::new();
     let mut pila: Vec<usize> = Vec::new();
@@ -247,8 +395,17 @@ fn trova_zone(maschera: &[u8], w: usize, h: usize) -> Vec<Zona> {
         //    (es. le cifre nere) contano, e il bordo conta solo a metà.
         let area = area_contorno(&pixel_zona, w, min_x, min_y, max_x, max_y);
 
+        // 3) conta i pixel molto luminosi della zona
+        let mut quanti_luminosi = 0;
+        for &i in &pixel_zona {
+            if luminosi[i] == 1 {
+                quanti_luminosi += 1;
+            }
+        }
+
         zone.push(Zona {
             area,
+            luminosi: quanti_luminosi,
             x: min_x as i32,
             y: min_y as i32,
             w: (max_x - min_x + 1) as i32,
@@ -313,13 +470,23 @@ fn area_contorno(pixel_zona: &[usize], w: usize, min_x: usize, min_y: usize, max
     (pieni as f32 - bordo as f32 / 2.0 - 1.0).max(0.0)
 }
 
+/// Quanto una zona assomiglia al display acceso:
+/// pixel luminosi × quanto della zona è luminosa.
+/// Il display è piccolo ma luminoso quasi tutto: punteggio alto.
+/// Un muro o la strada illuminati sono grandi ma con poca luce forte: punteggio basso.
+fn punteggio_display(z: &Zona) -> f32 {
+    let luminosi = z.luminosi as f32;
+    let quanto_luminosa = luminosi / z.area.max(1.0);
+    luminosi * quanto_luminosa
+}
+
 /// Cerca il display arancione nel fotogramma. Ritorna il riquadro con il
 /// margine di sicurezza, oppure None se non lo trova.
 pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> {
     if foto.larghezza < 2 || foto.altezza < 2 {
         return None;
     }
-    let (maschera, pw, ph) = maschera_arancione(foto);
+    let (maschera, luminosi, pw, ph) = maschera_colore(foto, imp);
 
     // chiusura (riempie i buchetti) e apertura (toglie i puntini)
     let maschera = dilata_o_erodi(&maschera, pw, ph, true);
@@ -327,27 +494,58 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
     let maschera = dilata_o_erodi(&maschera, pw, ph, false);
     let maschera = dilata_o_erodi(&maschera, pw, ph, true);
 
-    // la zona arancione più grande
-    let zone = trova_zone(&maschera, pw, ph);
+    // sceglie il display tra le zone arancioni:
+    // - non troppo piccola e nella parte bassa dell'immagine
+    // - vince quella con il punteggio più alto (vedi punteggio_display)
+    let area_minima = 500.0 * SCALA_RILEVAMENTO * SCALA_RILEVAMENTO; // proporzionata alla scala ridotta
+    let zone = trova_zone(&maschera, &luminosi, pw, ph);
     let mut migliore: Option<&Zona> = None;
     for z in &zone {
-        if migliore.is_none() || z.area > migliore.unwrap().area {
+        if z.area <= area_minima || z.luminosi == 0 {
+            continue;
+        }
+        let centro_y = (z.y as f32 + z.h as f32 / 2.0) / ph as f32;
+        if centro_y < ALTEZZA_MINIMA_DISPLAY {
+            continue;
+        }
+        // il display è più largo che alto: così scarta le strisce
+        // colorate della moto e i riflessi in verticale
+        if z.w < z.h {
+            continue;
+        }
+        if migliore.is_none() || punteggio_display(z) > punteggio_display(migliore.unwrap()) {
             migliore = Some(z);
         }
     }
     let z = migliore?;
 
-    let area_minima = 500.0 * SCALA_RILEVAMENTO * SCALA_RILEVAMENTO; // proporzionata alla scala ridotta
-    if z.area <= area_minima {
-        return None;
+    // a volte il display è diviso in più pezzi (le cifre scure lo tagliano):
+    // unisce al pezzo scelto i pezzi vicini accesi almeno la metà di lui
+    let vicino = z.h;
+    let punteggio_minimo = punteggio_display(z) / 2.0;
+    let (mut x1, mut y1, mut x2, mut y2) = (z.x, z.y, z.x + z.w, z.y + z.h);
+    for altra in &zone {
+        if altra.luminosi == 0 || punteggio_display(altra) < punteggio_minimo {
+            continue;
+        }
+        let tocca = altra.x < z.x + z.w + vicino
+            && altra.x + altra.w > z.x - vicino
+            && altra.y < z.y + z.h + vicino
+            && altra.y + altra.h > z.y - vicino;
+        if tocca {
+            x1 = x1.min(altra.x);
+            y1 = y1.min(altra.y);
+            x2 = x2.max(altra.x + altra.w);
+            y2 = y2.max(altra.y + altra.h);
+        }
     }
 
     // riporta le coordinate alla risoluzione originale
     let inv = 1.0 / SCALA_RILEVAMENTO;
-    let x = (z.x as f32 * inv) as i32;
-    let y = (z.y as f32 * inv) as i32;
-    let w = (z.w as f32 * inv) as i32;
-    let h = (z.h as f32 * inv) as i32;
+    let x = (x1 as f32 * inv) as i32;
+    let y = (y1 as f32 * inv) as i32;
+    let w = ((x2 - x1) as f32 * inv) as i32;
+    let h = ((y2 - y1) as f32 * inv) as i32;
 
     // aggiunge il margine di sicurezza, senza uscire dal fotogramma
     let pad_x = (w as f32 * imp.margine) as i32;

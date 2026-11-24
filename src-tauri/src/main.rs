@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use base64::Engine;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use motore::rilevamento::{Impostazioni, Riquadro};
+use motore::rilevamento::{ColoreDisplay, Impostazioni, Momento, Riquadro};
 use motore::video::{self, Esito};
 
 // diventa true quando l'utente preme "Interrompi"
@@ -36,11 +36,24 @@ fn percorso_ffmpeg() -> PathBuf {
     PathBuf::from(nome)
 }
 
-fn impostazioni(forza: u32, margine: f32, debug: bool) -> Impostazioni {
+/// Le scelte del display che arrivano dalla finestra.
+#[derive(Deserialize)]
+struct SceltaDisplay {
+    /// "auto", "giorno" o "notte"
+    momento: String,
+    /// "arancione", "rosso", "giallo", "verde", "blu", "bianco" o "video"
+    colore: String,
+    /// il colore preso dal video (solo con "video")
+    rgb: [u8; 3],
+}
+
+fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) -> Impostazioni {
     Impostazioni {
         blocco_pixel: forza.clamp(4, 40),
         margine: margine.clamp(0.0, 0.5),
         debug,
+        momento: Momento::da_nome(&display.momento),
+        colore: ColoreDisplay::da_nome(&display.colore, display.rgb),
     }
 }
 
@@ -102,9 +115,15 @@ fn in_percentuale(r: Riquadro, larghezza: usize, altezza: usize) -> Zona {
 }
 
 #[tauri::command]
-async fn anteprima(percorso: String, posizione: f64, forza: u32, margine: f32) -> Result<RispostaAnteprima, String> {
+async fn anteprima(
+    percorso: String,
+    posizione: f64,
+    forza: u32,
+    margine: f32,
+    display: SceltaDisplay,
+) -> Result<RispostaAnteprima, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let imp = impostazioni(forza, margine, false);
+        let imp = impostazioni(forza, margine, false, &display);
         let a = video::anteprima(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp)?;
         let (larghezza, altezza) = (a.foto.larghezza, a.foto.altezza);
 
@@ -175,6 +194,7 @@ async fn elabora(
     forza: u32,
     margine: f32,
     debug: bool,
+    display: SceltaDisplay,
 ) -> Result<Risultato, String> {
     ANNULLA.store(false, Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(move || {
@@ -184,14 +204,14 @@ async fn elabora(
             _ => entrata.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
         };
         let uscita = nome_uscita(&entrata, &cartella_uscita);
-        let imp = impostazioni(forza, margine, debug);
+        let imp = impostazioni(forza, margine, debug, &display);
         let inizio = Instant::now();
 
         if video::e_immagine(&entrata) {
             let trovato = video::elabora_foto(&entrata, &uscita, &imp)?;
             if !trovato {
                 let _ = std::fs::remove_file(&uscita);
-                return Err("Non trovo il cruscotto arancione in questa foto.".to_string());
+                return Err("Non trovo il display in questa foto.".to_string());
             }
             return Ok(Risultato {
                 uscita: uscita.to_string_lossy().to_string(),

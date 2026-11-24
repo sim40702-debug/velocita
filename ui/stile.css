@@ -520,3 +520,100 @@ input[type="range"] {
 .riga > .link:last-child {
   margin-left: auto;
 }
+
+/* ---------- SEZIONE DISPLAY ---------- */
+
+/* riga con il titolo sopra e i colori sotto */
+.riga.colonna {
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 12px 0;
+}
+
+.colori {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.colori button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--grigio);
+}
+
+.colori button.attivo {
+  color: var(--testo);
+  font-weight: 600;
+}
+
+/* il pallino colorato */
+.colori i,
+.pallino {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+
+.colori button.attivo i,
+.pallino.attivo {
+  box-shadow: 0 0 0 2px var(--scheda), 0 0 0 4px var(--blu);
+}
+
+.pallino {
+  margin-left: auto;
+}
+
+.pallino-bianco {
+  background: #fff;
+  border: 1px solid var(--bordo-trascina);
+}
+
+/* ---------- SCEGLI IL COLORE DAL VIDEO ---------- */
+
+.anteprima img.cliccabile {
+  cursor: crosshair;
+}
+
+.mirino {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.fumetto {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 15px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.due-bottoni {
+  display: flex;
+  gap: 12px;
+}
+
+.due-bottoni .bottone {
+  flex: 1;
+}
+
+/* il pallino sta subito prima di "Scegli…" */
+.riga > .pallino + .link:last-child {
+  margin-left: 0;
+}

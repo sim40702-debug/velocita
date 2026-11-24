@@ -175,6 +175,63 @@
         </div>
       </div>
       <p class="nota">Più forza = blocchi più grandi, il numero si legge meno.</p>
+
+      <p class="sezione">DISPLAY</p>
+      <div class="scheda">
+        <div class="riga">
+          <span>Momento</span>
+          <div id="scelta-momento" class="segmentato stretto">
+            <button data-valore="auto" class="attivo">Automatico</button>
+            <button data-valore="giorno">Giorno</button>
+            <button data-valore="notte">Notte</button>
+          </div>
+        </div>
+        <div class="riga colonna">
+          <span>Colore del display</span>
+          <div id="scelta-colore" class="colori">
+            <button data-valore="arancione" class="attivo"><i style="background:#ff8c1a"></i>Arancione</button>
+            <button data-valore="rosso"><i style="background:#ff3b30"></i>Rosso</button>
+            <button data-valore="giallo"><i style="background:#ffd60a"></i>Giallo</button>
+            <button data-valore="verde"><i style="background:#30d158"></i>Verde</button>
+            <button data-valore="blu"><i style="background:#0a84ff"></i>Blu</button>
+            <button data-valore="bianco"><i class="pallino-bianco"></i>Bianco</button>
+          </div>
+        </div>
+        <div class="riga">
+          <span>Colore preso dal video</span>
+          <i id="pallino-video" class="pallino nascosto"></i>
+          <button id="btn-scegli-colore" class="link">Scegli…</button>
+        </div>
+      </div>
+      <p id="nota-display" class="nota">Automatico capisce da solo se il video è di giorno o di notte.<br>Con «Scegli…» clicchi sul display nell'anteprima e l'app usa quel colore.</p>
+    </section>
+
+    <!-- 7. SCEGLI IL COLORE DAL VIDEO -->
+    <section id="schermata-scegli" class="schermata nascosto">
+      <header class="titolo">
+        <h1>Velocità</h1>
+        <p>Nasconde il numero della velocità nei video della moto.</p>
+      </header>
+
+      <div class="anteprima">
+        <img id="scegli-img" alt="Anteprima" class="cliccabile">
+        <div id="scegli-mirino" class="mirino nascosto"></div>
+        <div id="scegli-fumetto" class="fumetto">Clicca sul display della moto</div>
+      </div>
+      <input id="cursore-scegli" type="range" min="0" max="1000" value="300">
+      <p class="nota">Sposta il cursore per trovare un punto dove il display si vede bene.</p>
+
+      <div class="scheda">
+        <div class="riga">
+          <span>Colore scelto</span>
+          <i id="scegli-pallino" class="pallino nascosto"></i>
+        </div>
+      </div>
+
+      <div class="due-bottoni">
+        <button id="btn-scegli-annulla" class="bottone grigio-chiaro">Annulla</button>
+        <button id="btn-scegli-usa" class="bottone blu" disabled>Usa questo colore</button>
+      </div>
     </section>
 
     <footer class="piede">

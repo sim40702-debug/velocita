@@ -28,6 +28,9 @@ const scelte = {
   usoCpu: "auto",        // auto, 0.25, 0.5, 0.75, 1
   forza: 10,             // dimensione dei blocchi della pixelatura
   margine: 0.15,         // margine attorno al cruscotto
+  momento: "auto",       // auto, giorno, notte
+  colore: "arancione",   // arancione, rosso, giallo, verde, blu, bianco, video
+  coloreVideo: [255, 140, 26], // il colore preso cliccando sul display (con "video")
   controllaAggiornamenti: true,
 };
 
@@ -58,12 +61,12 @@ function $(id) {
 
 // mostra una schermata e nasconde le altre
 function mostraSchermata(nome) {
-  const tutte = ["inizio", "pronto", "corso", "finito", "impostazioni"];
+  const tutte = ["inizio", "pronto", "corso", "finito", "impostazioni", "scegli"];
   for (const s of tutte) {
     $("schermata-" + s).classList.toggle("nascosto", s !== nome);
   }
   // il piede (versione e Impostazioni) non serve nelle impostazioni né mentre lavora
-  document.querySelector(".piede").classList.toggle("nascosto", nome === "impostazioni" || nome === "corso");
+  document.querySelector(".piede").classList.toggle("nascosto", nome === "impostazioni" || nome === "corso" || nome === "scegli");
 }
 
 // 75 secondi -> "1:15"
@@ -98,6 +101,20 @@ function valoreUsoCpu() {
     return 0.5; // Auto = 50%, lascia metà dei core liberi
   }
   return Number(scelte.usoCpu);
+}
+
+// le scelte del display da mandare a Rust
+function sceltaDisplay() {
+  return {
+    momento: scelte.momento,
+    colore: scelte.colore,
+    rgb: scelte.coloreVideo,
+  };
+}
+
+// [255, 140, 26] -> "rgb(255,140,26)"
+function rgbInTesto(rgb) {
+  return "rgb(" + rgb.join(",") + ")";
 }
 
 // segna come attivo il bottone giusto di una scelta a segmenti
@@ -283,6 +300,7 @@ async function caricaAnteprima() {
       posizione: posizione,
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
+      display: sceltaDisplay(),
     });
     if (mioNumero !== numeroAnteprima) {
       return; // nel frattempo è stata chiesta un'altra anteprima
@@ -298,7 +316,7 @@ async function caricaAnteprima() {
         ? "Il riquadro rosso è la zona che verrà coperta."
         : "Il riquadro rosso è la zona che verrà coperta. Sposta per controllare.";
     } else {
-      $("anteprima-carico").textContent = "Qui non trovo il cruscotto arancione.";
+      $("anteprima-carico").textContent = "Qui non trovo il display.";
       $("testo-anteprima").textContent = file.foto
         ? "In questa foto il numero non verrebbe coperto."
         : "Prova a spostare il cursore su un altro punto del video.";
@@ -342,6 +360,7 @@ async function avvia() {
         forza: Number(scelte.forza),
         margine: Number(scelte.margine),
         debug: $("interruttore-prova").checked,
+        display: sceltaDisplay(),
       });
 
       if (risultato.interrotto) {
@@ -395,6 +414,7 @@ function preparaSchermataCorso(file, indice) {
       posizione: 0.3,
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
+      display: sceltaDisplay(),
     })
       .then((r) => {
         if (fileInCorso !== indice) {
@@ -448,7 +468,7 @@ function mostraFinito(secondi) {
     $("esito-titolo").textContent = "Fatto, ma controlla";
     const pezzi = [];
     if (nonTrovati.length > 0) {
-      pezzi.push("In " + nonTrovati.map((r) => r.nome).join(", ") + " non ho trovato il cruscotto arancione.");
+      pezzi.push("In " + nonTrovati.map((r) => r.nome).join(", ") + " non ho trovato il display.");
     }
     if (sbagliati.length > 0) {
       pezzi.push(sbagliati.length + " file non sono stati elaborati (vedi Mostra dettagli).");
@@ -607,6 +627,139 @@ function chiudiImpostazioni() {
 }
 
 // ==========================================
+// IMPOSTAZIONI: DISPLAY
+// ==========================================
+
+// mette in evidenza il colore scelto
+function aggiornaColori() {
+  for (const b of $("scelta-colore").querySelectorAll("button")) {
+    b.classList.toggle("attivo", b.dataset.valore === scelte.colore);
+  }
+  // il pallino accanto a "Colore preso dal video"
+  const pallino = $("pallino-video");
+  if (scelte.colore === "video") {
+    pallino.style.background = rgbInTesto(scelte.coloreVideo);
+    pallino.classList.add("attivo");
+    pallino.classList.remove("nascosto");
+  } else {
+    pallino.classList.add("nascosto");
+  }
+}
+
+// ==========================================
+// SCEGLI IL COLORE DAL VIDEO
+// ==========================================
+
+// il colore cliccato (null finché non si clicca)
+let coloreCliccato = null;
+let timerScegli = null;
+
+function apriScegliColore() {
+  if (coda.length === 0) {
+    $("nota-display").textContent = "Per prendere il colore dal video, prima aggiungi un video o una foto.";
+    return;
+  }
+  coloreCliccato = null;
+  $("scegli-pallino").classList.add("nascosto");
+  $("scegli-mirino").classList.add("nascosto");
+  $("btn-scegli-usa").disabled = true;
+  $("scegli-fumetto").textContent = "Clicca sul display della moto";
+  // parte dallo stesso punto dell'anteprima; con una foto il cursore non serve
+  $("cursore-scegli").value = $("cursore-anteprima").value;
+  $("cursore-scegli").classList.toggle("nascosto", coda[indiceAnteprima].foto);
+  mostraSchermata("scegli");
+  caricaFotogrammaScegli();
+}
+
+async function caricaFotogrammaScegli() {
+  const file = coda[indiceAnteprima];
+  try {
+    const risposta = await invoke("anteprima", {
+      percorso: file.percorso,
+      posizione: Number($("cursore-scegli").value) / 1000,
+      forza: Number(scelte.forza),
+      margine: Number(scelte.margine),
+      display: sceltaDisplay(),
+    });
+    $("scegli-img").src = risposta.immagine;
+    $("scegli-mirino").classList.add("nascosto");
+  } catch (errore) {
+    $("scegli-fumetto").textContent = "Anteprima non disponibile: " + errore;
+  }
+}
+
+// clic sull'immagine: prende il colore in quel punto
+function cliccaSulVideo(evento) {
+  const img = $("scegli-img");
+  if (!img.naturalWidth) {
+    return;
+  }
+  // l'immagine è "contain": calcolo dove finisce davvero dentro il riquadro nero
+  const box = img.getBoundingClientRect();
+  const scala = Math.min(box.width / img.naturalWidth, box.height / img.naturalHeight);
+  const sinistra = (box.width - img.naturalWidth * scala) / 2;
+  const sopra = (box.height - img.naturalHeight * scala) / 2;
+  const xClic = evento.clientX - box.left;
+  const yClic = evento.clientY - box.top;
+  // punto cliccato nell'immagine vera
+  const x = Math.round((xClic - sinistra) / scala);
+  const y = Math.round((yClic - sopra) / scala);
+  if (x < 0 || y < 0 || x >= img.naturalWidth || y >= img.naturalHeight) {
+    return; // clic sulle bande nere
+  }
+
+  // per leggere i pixel disegno l'immagine su una tela (non si vede)
+  const tela = document.createElement("canvas");
+  tela.width = img.naturalWidth;
+  tela.height = img.naturalHeight;
+  const ctx = tela.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+
+  // un quadratino 7x7 attorno al clic (un pixel solo potrebbe essere sbagliato)
+  const x0 = Math.min(Math.max(0, x - 3), tela.width - 7);
+  const y0 = Math.min(Math.max(0, y - 3), tela.height - 7);
+  const dati = ctx.getImageData(Math.max(0, x0), Math.max(0, y0), 7, 7).data;
+
+  // media dei pixel non scuri (così le cifre nere non contano)
+  let somma = [0, 0, 0];
+  let quanti = 0;
+  for (let i = 0; i < dati.length; i += 4) {
+    if (Math.max(dati[i], dati[i + 1], dati[i + 2]) >= 80) {
+      somma[0] += dati[i];
+      somma[1] += dati[i + 1];
+      somma[2] += dati[i + 2];
+      quanti++;
+    }
+  }
+  if (quanti === 0) {
+    $("scegli-fumetto").textContent = "Qui è troppo scuro: clicca sulla parte accesa del display";
+    return;
+  }
+  coloreCliccato = [
+    Math.round(somma[0] / quanti),
+    Math.round(somma[1] / quanti),
+    Math.round(somma[2] / quanti),
+  ];
+
+  // mostra il mirino e il colore scelto
+  $("scegli-mirino").style.left = xClic + "px";
+  $("scegli-mirino").style.top = yClic + "px";
+  $("scegli-mirino").classList.remove("nascosto");
+  $("scegli-pallino").style.background = rgbInTesto(coloreCliccato);
+  $("scegli-pallino").classList.remove("nascosto");
+  $("scegli-fumetto").textContent = "Clicca sul display della moto";
+  $("btn-scegli-usa").disabled = false;
+}
+
+function usaColoreCliccato() {
+  scelte.colore = "video";
+  scelte.coloreVideo = coloreCliccato;
+  salvaScelte();
+  aggiornaColori();
+  mostraSchermata("impostazioni");
+}
+
+// ==========================================
 // AVVIO: collega i bottoni
 // ==========================================
 
@@ -616,6 +769,8 @@ async function avvio() {
   // mette i valori salvati nei controlli
   aggiornaSegmentato("scelta-cpu", scelte.usoCpu);
   aggiornaSegmentato("scelta-margine", scelte.margine);
+  aggiornaSegmentato("scelta-momento", scelte.momento);
+  aggiornaColori();
   $("cursore-forza").value = scelte.forza;
   $("interruttore-aggiornamenti").checked = scelte.controllaAggiornamenti;
 
@@ -706,6 +861,33 @@ async function avvio() {
       salvaScelte();
     }
   });
+
+  $("scelta-momento").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (b) {
+      scelte.momento = b.dataset.valore;
+      aggiornaSegmentato("scelta-momento", scelte.momento);
+      salvaScelte();
+    }
+  });
+  $("scelta-colore").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (b) {
+      scelte.colore = b.dataset.valore;
+      aggiornaColori();
+      salvaScelte();
+    }
+  });
+  $("btn-scegli-colore").addEventListener("click", apriScegliColore);
+
+  // scegli il colore dal video
+  $("scegli-img").addEventListener("click", cliccaSulVideo);
+  $("cursore-scegli").addEventListener("input", () => {
+    clearTimeout(timerScegli);
+    timerScegli = setTimeout(caricaFotogrammaScegli, 120);
+  });
+  $("btn-scegli-annulla").addEventListener("click", () => mostraSchermata("impostazioni"));
+  $("btn-scegli-usa").addEventListener("click", usaColoreCliccato);
 
   // avviso aggiornamento
   $("btn-aggiorna").addEventListener("click", installaAggiornamento);

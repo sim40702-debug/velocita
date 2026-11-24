@@ -25,6 +25,16 @@ npm run ffmpeg
 npm run dev
 ```
 
+## Impostazioni del display
+
+In **Impostazioni → Display**:
+
+- **Momento**: Automatico (capisce da solo se il video è di giorno o di notte), Giorno o Notte
+- **Colore del display**: arancione, rosso, giallo, verde, blu o bianco
+- **Colore preso dal video**: con **Scegli…** clicchi sul display nell'anteprima e l'app cerca quel colore
+
+Le soglie per giorno e notte sono in `motore/src/rilevamento.rs` (`SOGLIE_GIORNO`, `SOGLIE_NOTTE`).
+
 ## Release e aggiornamenti automatici
 
 Carichi un tag con la versione (v minuscola). Il messaggio del tag è la novità che l'app mostra nell'avviso di aggiornamento:
