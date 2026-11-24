@@ -7,246 +7,317 @@
   <link rel="stylesheet" href="stile.css">
 </head>
 <body>
-  <main id="pagina">
+  <!-- ICONE: tutte qui, si usano con <svg class="icona"><use href="#i-nome"/></svg> -->
+  <svg class="nascosto" aria-hidden="true">
+    <symbol id="i-impostazioni" viewBox="0 0 20 20"><path d="M3 6h7M14 6h3M3 14h3M10 14h7"/><circle cx="12" cy="6" r="2"/><circle cx="8" cy="14" r="2"/></symbol>
+    <symbol id="i-piu" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
+    <symbol id="i-cartella" viewBox="0 0 20 20"><path d="M3 6.5V15a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H9.5L8 5H4a1 1 0 0 0-1 1.5z"/></symbol>
+    <symbol id="i-spunta" viewBox="0 0 20 20"><path d="M5 10.5l3.2 3.2L15 6.8"/></symbol>
+    <symbol id="i-x" viewBox="0 0 20 20"><path d="M6 6l8 8M14 6l-8 8"/></symbol>
+    <symbol id="i-attenzione" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 6.5v4.5"/><circle cx="10" cy="13.6" r="0.4"/></symbol>
+    <symbol id="i-scarica" viewBox="0 0 20 20"><path d="M10 4v9M6 9.5l4 4 4-4M4.5 16h11"/></symbol>
+    <symbol id="i-video" viewBox="0 0 20 20"><rect x="5.5" y="2.5" width="9" height="15" rx="1.5"/><rect x="7.5" y="11" width="5" height="2.5" stroke-dasharray="1.6 1"/></symbol>
+    <symbol id="i-foto" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="1.5"/><path d="M3.5 14l4-4 3 3 2-2 4 4"/><circle cx="13" cy="7.5" r="1"/></symbol>
+    <symbol id="i-freccia" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></symbol>
+  </svg>
 
-    <!-- AVVISO AGGIORNAMENTO (compare solo se c'è una versione nuova) -->
-    <div id="avviso" class="scheda avviso nascosto">
-      <div class="avviso-icona">↓</div>
-      <div class="avviso-testo">
-        <strong id="avviso-titolo">È disponibile una nuova versione</strong>
-        <span id="avviso-note"></span>
-      </div>
-      <div class="avviso-bottoni">
-        <button id="btn-aggiorna" class="bottone blu piccolo">Aggiorna</button>
-        <button id="btn-dopo" class="link grigio">Più tardi</button>
-      </div>
+  <!-- BARRA IN ALTO (si può trascinare per spostare la finestra) -->
+  <header class="barra" data-tauri-drag-region>
+    <div class="barra-titolo" data-tauri-drag-region>
+      <strong data-tauri-drag-region>Velocità</strong>
+      <span id="barra-sottotitolo" data-tauri-drag-region></span>
     </div>
+    <button id="btn-impostazioni" class="bottone-icona" title="Impostazioni (⌘,)">
+      <svg class="icona"><use href="#i-impostazioni"/></svg>
+    </button>
+  </header>
+
+  <!-- AVVISO AGGIORNAMENTO (compare solo se c'è una versione nuova) -->
+  <div id="avviso" class="avviso nascosto">
+    <svg class="icona avviso-icona"><use href="#i-scarica"/></svg>
+    <div class="avviso-testo">
+      <strong id="avviso-titolo">È disponibile una nuova versione</strong>
+      <span id="avviso-note"></span>
+    </div>
+    <button id="btn-dopo" class="bottone secondario piccolo">Più tardi</button>
+    <button id="btn-aggiorna" class="bottone primario piccolo">Aggiorna</button>
+  </div>
+
+  <main id="pagina">
 
     <!-- 1. INIZIO -->
     <section id="schermata-inizio" class="schermata">
-      <header class="titolo">
-        <h1>Velocità</h1>
-        <p>Nasconde il numero della velocità nei video della moto.</p>
-      </header>
       <div id="zona-trascina" class="zona-trascina">
-        <div class="icona-play">▶</div>
-        <h2>Trascina qui un video o una foto</h2>
-        <p class="grigio">Puoi trascinare anche più file insieme</p>
-        <button id="btn-scegli" class="bottone blu">Scegli file…</button>
-        <p class="formati">MP4, MOV, MKV, AVI, JPG, PNG, WEBP</p>
+        <svg class="icona icona-grande"><use href="#i-video"/></svg>
+        <h2>Trascina qui i video della moto</h2>
+        <p>Uno o più video, oppure delle foto. Il numero della velocità viene coperto in automatico.</p>
+        <button id="btn-scegli" class="bottone primario">Scegli file…</button>
+        <p class="suggerimento">oppure ⌘O</p>
+        <p class="formati">MP4 · MOV · MKV · AVI · JPG · PNG · WEBP</p>
       </div>
     </section>
 
     <!-- 2. PRONTO -->
-    <section id="schermata-pronto" class="schermata nascosto">
-      <header class="titolo">
-        <h1>Velocità</h1>
-        <p>Nasconde il numero della velocità nei video della moto.</p>
-      </header>
-
-      <div class="anteprima">
-        <img id="anteprima-img" alt="Anteprima">
-        <div id="anteprima-zona" class="zona-rossa nascosto"></div>
-        <div id="anteprima-carico" class="anteprima-messaggio">Carico l'anteprima…</div>
-        <div id="anteprima-info" class="info-anteprima nascosto"><i id="info-pallino"></i><span id="info-testo"></span></div>
-      </div>
-      <input id="cursore-anteprima" type="range" min="0" max="1000" value="300">
-      <p id="testo-anteprima" class="nota">Il riquadro rosso è la zona che verrà coperta. Sposta per controllare.</p>
-
-      <div class="scheda">
-        <div class="riga">
-          <span id="etichetta-file">Video</span>
-          <span id="nome-file" class="valore"></span>
-          <button id="btn-cambia-file" class="link">Cambia</button>
+    <section id="schermata-pronto" class="schermata due-colonne nascosto">
+      <div class="area">
+        <div class="anteprima">
+          <img id="anteprima-img" alt="Anteprima">
+          <div id="anteprima-zona" class="zona-rossa nascosto"></div>
+          <div id="anteprima-carico" class="anteprima-messaggio">Carico l'anteprima…</div>
+          <div id="anteprima-info" class="info-anteprima nascosto"><i id="info-pallino"></i><span id="info-testo"></span></div>
         </div>
-        <div id="lista-coda" class="lista-coda nascosto"></div>
-        <div class="riga">
-          <span>Salva in</span>
-          <span id="nome-cartella" class="valore">Accanto al video</span>
-          <button id="btn-reset-cartella" class="link grigio nascosto" title="Salva accanto al video">✕</button>
-          <button id="btn-cambia-cartella" class="link">Cambia</button>
-        </div>
+        <input id="cursore-anteprima" type="range" min="0" max="1000" value="300">
+        <p id="testo-anteprima" class="nota">La zona tratteggiata è quella che verrà coperta. Sposta il cursore per controllare.</p>
       </div>
 
-      <div class="scheda">
-        <div class="riga">
-          <span>Uso CPU</span>
-          <div id="scelta-cpu" class="segmentato">
-            <button data-valore="auto" class="attivo">Auto</button>
-            <button data-valore="0.25">25%</button>
-            <button data-valore="0.5">50%</button>
-            <button data-valore="0.75">75%</button>
-            <button data-valore="1">100%</button>
+      <aside class="pannello">
+        <div class="pannello-corpo">
+          <div class="gruppo-titolo">
+            <span>File</span>
+            <button id="btn-cambia-file" class="link">Aggiungi</button>
           </div>
-        </div>
-        <div class="riga">
-          <span>Mostra i riquadri nel video (prova)</span>
-          <label class="interruttore">
-            <input id="interruttore-prova" type="checkbox">
-            <span></span>
-          </label>
-        </div>
-      </div>
+          <div id="lista-coda" class="lista-file"></div>
 
-      <button id="btn-avvia" class="bottone blu largo">Avvia</button>
+          <div class="gruppo-titolo"><span>Uscita</span></div>
+          <div class="riga">
+            <span>Salva in</span>
+            <span id="nome-cartella" class="valore">Accanto al video</span>
+            <button id="btn-reset-cartella" class="bottone-icona piccolo nascosto" title="Salva accanto al video">
+              <svg class="icona"><use href="#i-x"/></svg>
+            </button>
+            <button id="btn-cambia-cartella" class="link">Cambia</button>
+          </div>
+
+          <div class="gruppo-titolo"><span>Copertura</span></div>
+          <div class="riga">
+            <span>Forza</span>
+            <input id="cursore-forza" type="range" min="6" max="24" value="10">
+            <span id="valore-forza" class="numero-forza">10 px</span>
+          </div>
+          <div class="riga">
+            <span>Margine</span>
+            <div id="scelta-margine" class="segmentato">
+              <button data-valore="0.08">Piccolo</button>
+              <button data-valore="0.15" class="attivo">Normale</button>
+              <button data-valore="0.25">Grande</button>
+            </div>
+          </div>
+          <p class="nota">Più forza = quadrati più grandi.</p>
+        </div>
+
+        <div class="pannello-piede">
+          <p id="testo-riepilogo" class="nota"></p>
+          <button id="btn-avvia" class="bottone primario largo">Avvia</button>
+        </div>
+      </aside>
     </section>
 
     <!-- 3. IN CORSO -->
-    <section id="schermata-corso" class="schermata nascosto">
-      <header class="titolo">
-        <h1>Velocità</h1>
-        <p id="corso-sottotitolo">Sto lavorando…</p>
-      </header>
-
-      <div class="anteprima">
-        <img id="corso-img" alt="">
-        <div id="corso-zona" class="zona-rossa nascosto"></div>
-      </div>
-
-      <div class="avanzamento">
-        <div class="riga-testo">
-          <strong id="corso-nome"></strong>
+    <section id="schermata-corso" class="schermata due-colonne nascosto">
+      <div class="area">
+        <div class="anteprima">
+          <img id="corso-img" alt="">
+          <div id="corso-zona" class="zona-rossa nascosto"></div>
+        </div>
+        <div class="barra-avanzamento"><div id="barra-piena"></div></div>
+        <div class="avanzamento-testo">
           <strong id="corso-percentuale">0%</strong>
+          <span id="corso-sottotitolo">Sto lavorando…</span>
+          <span id="corso-mancano" class="a-destra"></span>
         </div>
-        <div class="barra"><div id="barra-piena"></div></div>
-        <div class="riga-testo grigio piccolo-testo">
-          <span id="corso-fotogrammi">Avvio…</span>
-          <span id="corso-mancano"></span>
-        </div>
+        <p class="nota"><span id="corso-nome"></span> · <span id="corso-fotogrammi">Avvio…</span></p>
       </div>
 
-      <button id="btn-interrompi" class="bottone grigio-chiaro largo">Interrompi</button>
+      <aside class="pannello">
+        <div class="pannello-corpo">
+          <div class="gruppo-titolo"><span>File</span></div>
+          <div id="lista-corso" class="lista-file"></div>
 
-      <button id="btn-dettagli" class="link grigio dettagli">▸ Mostra dettagli</button>
-      <pre id="registro" class="registro nascosto"></pre>
+          <button id="btn-dettagli" class="link grigio dettagli">
+            <svg class="icona"><use href="#i-freccia"/></svg><span>Mostra dettagli</span>
+          </button>
+          <pre id="registro" class="registro nascosto"></pre>
+        </div>
+        <div class="pannello-piede">
+          <p class="nota">Puoi usare il computer mentre lavora.</p>
+          <button id="btn-interrompi" class="bottone secondario largo">Interrompi</button>
+        </div>
+      </aside>
     </section>
 
     <!-- 4. FINITO -->
-    <section id="schermata-finito" class="schermata nascosto">
-      <header class="titolo">
-        <h1>Velocità</h1>
-        <p>Nasconde il numero della velocità nei video della moto.</p>
-      </header>
-      <div class="esito">
-        <div id="esito-icona" class="esito-icona ok">✓</div>
-        <h2 id="esito-titolo">Fatto</h2>
-        <p id="esito-testo" class="grigio"></p>
-        <p id="esito-tempo" class="grigio piccolo-testo"></p>
+    <section id="schermata-finito" class="schermata due-colonne nascosto">
+      <div class="area">
+        <div class="anteprima">
+          <img id="finito-img" alt="">
+          <div id="finito-vuoto" class="anteprima-messaggio nascosto"></div>
+        </div>
       </div>
-      <button id="btn-apri" class="bottone blu largo">Apri video</button>
-      <button id="btn-mostra" class="bottone grigio-chiaro largo">Mostra nella cartella</button>
-      <button id="btn-altro" class="link centrato">Elabora un altro video</button>
+
+      <aside class="pannello">
+        <div class="pannello-corpo">
+          <div class="esito">
+            <div id="esito-icona" class="esito-icona ok"><svg class="icona"><use href="#i-spunta"/></svg></div>
+            <div>
+              <h2 id="esito-titolo">Fatto</h2>
+              <p id="esito-tempo" class="nota"></p>
+            </div>
+          </div>
+          <p id="esito-testo" class="esito-testo"></p>
+          <div id="lista-risultati" class="lista-file"></div>
+        </div>
+        <div class="pannello-piede">
+          <button id="btn-apri" class="bottone primario largo">Apri video</button>
+          <div class="due-bottoni">
+            <button id="btn-mostra" class="bottone secondario">Mostra nella cartella</button>
+            <button id="btn-altro" class="bottone secondario">Nuovi video</button>
+          </div>
+        </div>
+      </aside>
     </section>
 
-    <!-- 6. IMPOSTAZIONI -->
-    <section id="schermata-impostazioni" class="schermata nascosto">
-      <header class="titolo con-bottone">
-        <h1>Impostazioni</h1>
-        <button id="btn-fine" class="link grande">Fine</button>
-      </header>
+    <!-- 5. IMPOSTAZIONI -->
+    <section id="schermata-impostazioni" class="schermata impostazioni nascosto">
+      <nav id="menu-impostazioni" class="menu-impostazioni">
+        <button data-sezione="generale" class="attivo">Generale</button>
+        <button data-sezione="display">Display</button>
+        <button data-sezione="prestazioni">Prestazioni</button>
+        <button data-sezione="aggiornamenti">Aggiornamenti</button>
+      </nav>
 
-      <p class="sezione">AGGIORNAMENTI</p>
-      <div class="scheda">
-        <div class="riga">
-          <span>Controlla all'avvio</span>
-          <label class="interruttore">
-            <input id="interruttore-aggiornamenti" type="checkbox" checked>
-            <span></span>
-          </label>
+      <div class="impostazioni-contenuto">
+        <button id="btn-fine" class="bottone secondario piccolo bottone-fine">Fine</button>
+
+        <!-- Generale -->
+        <div id="sezione-generale" class="sezione-impostazioni">
+          <h1>Generale</h1>
+          <p class="sottotitolo">Come lavora Velocità.</p>
+          <div class="riga">
+            <div class="riga-testi">
+              <span>Mostra i riquadri nel video</span>
+              <span class="aiuto">Modalità prova: invece di pixelare, disegna nel video la zona trovata. Serve per controllare il rilevamento.</span>
+            </div>
+            <label class="interruttore">
+              <input id="interruttore-prova" type="checkbox">
+              <span></span>
+            </label>
+          </div>
+          <p class="nota">Forza e margine della copertura si regolano a destra dell'anteprima, mentre guardi il video.</p>
         </div>
-        <div class="riga">
-          <span id="testo-versione">Versione</span>
-          <button id="btn-controlla" class="link">Controlla ora</button>
+
+        <!-- Display -->
+        <div id="sezione-display" class="sezione-impostazioni nascosto">
+          <h1>Display</h1>
+          <p class="sottotitolo">Come l'app riconosce il display della moto.</p>
+          <div class="riga">
+            <div class="riga-testi">
+              <span>Momento</span>
+              <span class="aiuto">Automatico capisce da solo se il video è di giorno o di notte.</span>
+            </div>
+            <div id="scelta-momento" class="segmentato">
+              <button data-valore="auto" class="attivo">Automatico</button>
+              <button data-valore="giorno">Giorno</button>
+              <button data-valore="notte">Notte</button>
+            </div>
+          </div>
+          <div class="riga colonna">
+            <span>Colore del display</span>
+            <div id="scelta-colore" class="colori">
+              <button data-valore="arancione" class="attivo"><i style="background:#ff8c1a"></i>Arancione</button>
+              <button data-valore="rosso"><i style="background:#ff3b30"></i>Rosso</button>
+              <button data-valore="giallo"><i style="background:#ffd60a"></i>Giallo</button>
+              <button data-valore="verde"><i style="background:#30d158"></i>Verde</button>
+              <button data-valore="blu"><i style="background:#0a84ff"></i>Blu</button>
+              <button data-valore="bianco"><i class="pallino-bianco"></i>Bianco</button>
+            </div>
+          </div>
+          <div class="riga">
+            <div class="riga-testi">
+              <span>Colore preso dal video</span>
+              <span id="nota-display" class="aiuto">Clicca sul display nell'anteprima: l'app usa quel colore.</span>
+            </div>
+            <i id="pallino-video" class="pallino nascosto"></i>
+            <button id="btn-scegli-colore" class="link">Scegli…</button>
+          </div>
+          <div class="riga">
+            <div class="riga-testi">
+              <span>Posizione del display</span>
+              <span class="aiuto">«In basso» evita lampioni e finestre (consigliato). «Ovunque» se la videocamera è messa in un altro posto.</span>
+            </div>
+            <div id="scelta-posizione" class="segmentato">
+              <button data-valore="basso" class="attivo">In basso</button>
+              <button data-valore="ovunque">Ovunque</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Prestazioni -->
+        <div id="sezione-prestazioni" class="sezione-impostazioni nascosto">
+          <h1>Prestazioni</h1>
+          <p class="sottotitolo">Quanto del computer usa Velocità mentre lavora.</p>
+          <div class="riga">
+            <div class="riga-testi">
+              <span>Uso CPU</span>
+              <span class="aiuto">Con meno CPU il computer resta più libero, ma ci mette di più.</span>
+            </div>
+            <div id="scelta-cpu" class="segmentato">
+              <button data-valore="auto" class="attivo">Auto</button>
+              <button data-valore="0.25">25%</button>
+              <button data-valore="0.5">50%</button>
+              <button data-valore="0.75">75%</button>
+              <button data-valore="1">100%</button>
+            </div>
+          </div>
+          <p class="nota">Sul Mac il video viene creato con il chip del Mac, quando è possibile: è molto più veloce.</p>
+        </div>
+
+        <!-- Aggiornamenti -->
+        <div id="sezione-aggiornamenti" class="sezione-impostazioni nascosto">
+          <h1>Aggiornamenti</h1>
+          <p class="sottotitolo">Le versioni nuove arrivano da GitHub.</p>
+          <div class="riga">
+            <span>Controlla all'avvio</span>
+            <label class="interruttore">
+              <input id="interruttore-aggiornamenti" type="checkbox" checked>
+              <span></span>
+            </label>
+          </div>
+          <div class="riga">
+            <span id="testo-versione">Versione</span>
+            <button id="btn-controlla" class="link">Controlla ora</button>
+          </div>
+          <p class="nota">I tuoi video non vengono mai inviati in internet: tutto avviene sul computer.</p>
         </div>
       </div>
-
-      <p class="sezione">COPERTURA</p>
-      <div class="scheda">
-        <div class="riga">
-          <span>Forza pixel</span>
-          <input id="cursore-forza" type="range" min="6" max="24" value="10">
-          <span id="valore-forza" class="numero-forza">10 px</span>
-        </div>
-        <div class="riga">
-          <span>Margine attorno al numero</span>
-          <div id="scelta-margine" class="segmentato stretto">
-            <button data-valore="0.08">Piccolo</button>
-            <button data-valore="0.15" class="attivo">Normale</button>
-            <button data-valore="0.25">Grande</button>
-          </div>
-        </div>
-      </div>
-      <p class="nota">Più forza = blocchi più grandi (in pixel), il numero si legge meno.</p>
-
-      <p class="sezione">DISPLAY</p>
-      <div class="scheda">
-        <div class="riga">
-          <span>Momento</span>
-          <div id="scelta-momento" class="segmentato stretto">
-            <button data-valore="auto" class="attivo">Automatico</button>
-            <button data-valore="giorno">Giorno</button>
-            <button data-valore="notte">Notte</button>
-          </div>
-        </div>
-        <div class="riga colonna">
-          <span>Colore del display</span>
-          <div id="scelta-colore" class="colori">
-            <button data-valore="arancione" class="attivo"><i style="background:#ff8c1a"></i>Arancione</button>
-            <button data-valore="rosso"><i style="background:#ff3b30"></i>Rosso</button>
-            <button data-valore="giallo"><i style="background:#ffd60a"></i>Giallo</button>
-            <button data-valore="verde"><i style="background:#30d158"></i>Verde</button>
-            <button data-valore="blu"><i style="background:#0a84ff"></i>Blu</button>
-            <button data-valore="bianco"><i class="pallino-bianco"></i>Bianco</button>
-          </div>
-        </div>
-        <div class="riga">
-          <span>Colore preso dal video</span>
-          <i id="pallino-video" class="pallino nascosto"></i>
-          <button id="btn-scegli-colore" class="link">Scegli…</button>
-        </div>
-        <div class="riga">
-          <span>Posizione del display</span>
-          <div id="scelta-posizione" class="segmentato stretto">
-            <button data-valore="basso" class="attivo">In basso</button>
-            <button data-valore="ovunque">Ovunque</button>
-          </div>
-        </div>
-      </div>
-      <p id="nota-display" class="nota">Automatico capisce da solo se il video è di giorno o di notte.<br>Con «Scegli…» clicchi sul display nell'anteprima e l'app usa quel colore.<br>«In basso»: cerca il display solo nella metà bassa del video (consigliato).<br>«Ovunque»: se la videocamera è messa in un altro posto.</p>
     </section>
 
-    <!-- 7. SCEGLI IL COLORE DAL VIDEO -->
-    <section id="schermata-scegli" class="schermata nascosto">
-      <header class="titolo">
-        <h1>Velocità</h1>
-        <p>Nasconde il numero della velocità nei video della moto.</p>
-      </header>
-
-      <div class="anteprima">
-        <img id="scegli-img" alt="Anteprima" class="cliccabile">
-        <div id="scegli-mirino" class="mirino nascosto"></div>
-        <div id="scegli-fumetto" class="fumetto">Clicca sul display della moto</div>
-      </div>
-      <input id="cursore-scegli" type="range" min="0" max="1000" value="300">
-      <p class="nota">Sposta il cursore per trovare un punto dove il display si vede bene.</p>
-
-      <div class="scheda">
-        <div class="riga">
-          <span>Colore scelto</span>
-          <i id="scegli-pallino" class="pallino nascosto"></i>
+    <!-- 6. SCEGLI IL COLORE DAL VIDEO -->
+    <section id="schermata-scegli" class="schermata due-colonne nascosto">
+      <div class="area">
+        <div class="anteprima">
+          <img id="scegli-img" alt="Anteprima" class="cliccabile">
+          <div id="scegli-mirino" class="mirino nascosto"></div>
+          <div id="scegli-fumetto" class="fumetto">Clicca sul display della moto</div>
         </div>
+        <input id="cursore-scegli" type="range" min="0" max="1000" value="300">
+        <p class="nota">Sposta il cursore per trovare un punto dove il display si vede bene.</p>
       </div>
 
-      <div class="due-bottoni">
-        <button id="btn-scegli-annulla" class="bottone grigio-chiaro">Annulla</button>
-        <button id="btn-scegli-usa" class="bottone blu" disabled>Usa questo colore</button>
-      </div>
+      <aside class="pannello">
+        <div class="pannello-corpo">
+          <div class="gruppo-titolo"><span>Colore dal video</span></div>
+          <div class="riga">
+            <span>Colore scelto</span>
+            <i id="scegli-pallino" class="pallino nascosto"></i>
+          </div>
+          <p class="nota">Clicca sulla parte accesa del display. L'app cercherà quel colore in tutti i video.</p>
+        </div>
+        <div class="pannello-piede">
+          <button id="btn-scegli-usa" class="bottone primario largo" disabled>Usa questo colore</button>
+          <button id="btn-scegli-annulla" class="bottone secondario largo">Annulla</button>
+        </div>
+      </aside>
     </section>
-
-    <footer class="piede">
-      <span id="piede-versione"></span>
-      <button id="btn-impostazioni" class="link">Impostazioni</button>
-    </footer>
   </main>
 
   <script src="app.js"></script>

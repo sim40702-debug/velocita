@@ -11,11 +11,17 @@
     "windows": [
       {
         "title": "Velocità",
-        "width": 480,
-        "height": 720,
-        "minWidth": 420,
-        "minHeight": 620,
-        "dragDropEnabled": true
+        "width": 960,
+        "height": 600,
+        "minWidth": 820,
+        "minHeight": 540,
+        "dragDropEnabled": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 20,
+          "y": 20
+        }
       }
     ],
     "security": {

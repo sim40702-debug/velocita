@@ -4,6 +4,11 @@
 const tauri = window.__TAURI__;
 const invoke = tauri.core.invoke;
 
+// sul Mac la barra in alto lascia posto ai tre pallini della finestra
+if (navigator.userAgent.includes("Mac")) {
+  document.documentElement.classList.add("mac");
+}
+
 // ==========================================
 // DATI DELL'APP
 // ==========================================
@@ -66,8 +71,46 @@ function mostraSchermata(nome) {
   for (const s of tutte) {
     $("schermata-" + s).classList.toggle("nascosto", s !== nome);
   }
-  // il piede (versione e Impostazioni) non serve nelle impostazioni né mentre lavora
-  document.querySelector(".piede").classList.toggle("nascosto", nome === "impostazioni" || nome === "corso" || nome === "scegli");
+  // scritta grigia accanto a "Velocità" nella barra in alto
+  const sottotitoli = {
+    inizio: "",
+    pronto: testoCoda(),
+    corso: "Elaborazione",
+    finito: "Fatto",
+    impostazioni: "Impostazioni",
+    scegli: "Colore dal video",
+  };
+  $("barra-sottotitolo").textContent = sottotitoli[nome];
+  // mentre lavora le impostazioni non si aprono
+  $("btn-impostazioni").disabled = nome === "corso";
+}
+
+// "1 video", "3 video", "2 foto", "4 file"
+function testoCoda() {
+  const video = coda.filter((f) => !f.foto).length;
+  const foto = coda.length - video;
+  if (foto === 0) {
+    return video + " video";
+  }
+  if (video === 0) {
+    return foto + " foto";
+  }
+  return coda.length + " file";
+}
+
+// codice HTML di un'icona (sono tutte in index.html)
+function icona(nome) {
+  return '<svg class="icona"><use href="#i-' + nome + '"/></svg>';
+}
+
+// una riga della lista dei file: icona, nome, testo piccolo sotto
+function creaRigaFile(tag, file, meta) {
+  const riga = document.createElement(tag);
+  riga.className = "riga-file";
+  riga.innerHTML = icona(file.foto ? "foto" : "video") + '<span class="testi"><span class="nome"></span><span class="meta"></span></span>';
+  riga.querySelector(".nome").textContent = file.nome;
+  riga.querySelector(".meta").textContent = meta;
+  return riga;
 }
 
 // 75 secondi -> "1:15"
@@ -235,20 +278,21 @@ function aggiornaSchedaFile() {
   const primo = coda[indiceAnteprima];
   const tuttiFoto = coda.every((f) => f.foto);
 
-  if (coda.length === 1) {
-    $("etichetta-file").textContent = primo.foto ? "Foto" : "Video";
-    let testo = primo.nome;
-    if (!primo.foto) {
-      testo += "  ·  " + formattaTempo(primo.durata);
+  disegnaCoda();
+
+  // durata totale dei video, sopra il bottone Avvia
+  let durata = 0;
+  for (const f of coda) {
+    if (!f.foto) {
+      durata += f.durata;
     }
-    $("nome-file").textContent = testo;
-    $("lista-coda").classList.add("nascosto");
-  } else {
-    $("etichetta-file").textContent = "File";
-    $("nome-file").textContent = coda.length + " in coda";
-    disegnaCoda();
-    $("lista-coda").classList.remove("nascosto");
   }
+  let riepilogo = testoCoda();
+  if (durata > 0) {
+    riepilogo += " · " + formattaTempo(durata) + (coda.length > 1 ? " in tutto" : "");
+  }
+  $("testo-riepilogo").textContent = riepilogo;
+  $("barra-sottotitolo").textContent = testoCoda();
 
   $("nome-cartella").textContent = scelte.cartella ? nomeDaPercorso(scelte.cartella) : "Accanto al video";
   $("btn-reset-cartella").classList.toggle("nascosto", !scelte.cartella);
@@ -263,16 +307,14 @@ function disegnaCoda() {
   const lista = $("lista-coda");
   lista.innerHTML = "";
   coda.forEach((file, i) => {
-    const riga = document.createElement("button");
-    riga.className = i === indiceAnteprima ? "attivo" : "";
-
-    const nome = document.createElement("span");
-    nome.textContent = file.nome + (file.foto ? "" : "  ·  " + formattaTempo(file.durata));
-    riga.appendChild(nome);
+    const riga = creaRigaFile("button", file, file.foto ? "Foto" : formattaTempo(file.durata));
+    if (i === indiceAnteprima) {
+      riga.classList.add("attivo");
+    }
 
     const togli = document.createElement("span");
-    togli.className = "togli";
-    togli.textContent = "✕";
+    togli.className = "bottone-icona piccolo";
+    togli.innerHTML = icona("x");
     togli.title = "Togli dalla coda";
     togli.addEventListener("click", (evento) => {
       evento.stopPropagation();
@@ -356,8 +398,8 @@ async function caricaAnteprima() {
     if (risposta.zona) {
       $("anteprima-carico").classList.add("nascosto");
       $("testo-anteprima").textContent = file.foto
-        ? "Il riquadro rosso è la zona che verrà coperta."
-        : "Il riquadro rosso è la zona che verrà coperta. Sposta per controllare.";
+        ? "La zona tratteggiata è quella che verrà coperta."
+        : "La zona tratteggiata è quella che verrà coperta. Sposta il cursore per controllare.";
     } else {
       $("anteprima-carico").textContent = "Qui non trovo il display.";
       $("testo-anteprima").textContent = file.foto
@@ -412,13 +454,13 @@ async function avvia() {
         interrotto = true;
         break;
       }
-      ultimiRisultati.push({ nome: file.nome, uscita: risultato.uscita, trovato: risultato.trovato, errore: null });
+      ultimiRisultati.push({ nome: file.nome, foto: file.foto, uscita: risultato.uscita, trovato: risultato.trovato, errore: null, secondi: risultato.secondi });
       scriviRegistro("Salvato: " + risultato.uscita + " (" + formattaTempo(risultato.secondi) + ")");
       if (!risultato.trovato) {
-        scriviRegistro("Attenzione: cruscotto mai trovato in " + file.nome);
+        scriviRegistro("Attenzione: display mai trovato in " + file.nome);
       }
     } catch (errore) {
-      ultimiRisultati.push({ nome: file.nome, uscita: null, trovato: false, errore: String(errore) });
+      ultimiRisultati.push({ nome: file.nome, foto: file.foto, uscita: null, trovato: false, errore: String(errore) });
       scriviRegistro("Errore con " + file.nome + ": " + errore);
     }
   }
@@ -435,7 +477,42 @@ async function avvia() {
   avvisaFine();
 }
 
+// a destra, mentre lavora: fatto, in corso (con la percentuale) o in attesa
+function disegnaCodaCorso(indiceCorrente) {
+  const lista = $("lista-corso");
+  lista.innerHTML = "";
+  coda.forEach((file, i) => {
+    let meta = file.foto ? "Foto" : formattaTempo(file.durata);
+    let stato = '<span class="stato">In attesa</span>';
+    if (i < indiceCorrente) {
+      const r = ultimiRisultati[i];
+      if (r && r.errore) {
+        meta = "Non riuscito";
+        stato = '<span class="segno errore">' + icona("x") + "</span>";
+      } else if (r && !r.trovato) {
+        meta = "Display non trovato";
+        stato = '<span class="segno attenzione">' + icona("attenzione") + "</span>";
+      } else {
+        meta = r && r.secondi ? "Fatto in " + formattaTempo(r.secondi) : "Fatto";
+        stato = '<span class="segno ok">' + icona("spunta") + "</span>";
+      }
+    } else if (i === indiceCorrente) {
+      meta = "Avvio…";
+      stato = '<span id="riga-percentuale" class="stato forte">0%</span>';
+    }
+    const riga = creaRigaFile("div", file, meta);
+    if (i === indiceCorrente) {
+      riga.classList.add("attivo");
+      riga.querySelector(".meta").id = "riga-fotogrammi";
+      riga.querySelector(".testi").insertAdjacentHTML("beforeend", '<div class="mini-barra"><div id="riga-barra"></div></div>');
+    }
+    riga.insertAdjacentHTML("beforeend", stato);
+    lista.appendChild(riga);
+  });
+}
+
 function preparaSchermataCorso(file, indice) {
+  disegnaCodaCorso(indice);
   $("corso-nome").textContent = file.nome;
   $("corso-percentuale").textContent = "0%";
   $("barra-piena").style.width = "0%";
@@ -478,6 +555,12 @@ tauri.event.listen("avanzamento", (evento) => {
   $("barra-piena").style.width = percentuale + "%";
   $("corso-percentuale").textContent = percentuale + "%";
   $("corso-fotogrammi").textContent = "Fotogramma " + formattaNumero(a.fatti) + " di " + formattaNumero(a.totali);
+  // la riga del file in corso, a destra
+  if ($("riga-percentuale")) {
+    $("riga-percentuale").textContent = percentuale + "%";
+    $("riga-barra").style.width = percentuale + "%";
+    $("riga-fotogrammi").textContent = formattaNumero(a.fatti) + " di " + formattaNumero(a.totali) + " fotogrammi";
+  }
   if (a.fatti > 30 && a.fatti < a.totali) {
     $("corso-mancano").textContent = "Mancano circa " + formattaTempo(a.secondi_mancanti);
   } else if (a.fatti >= a.totali) {
@@ -499,28 +582,32 @@ function mostraFinito(secondi) {
   const riusciti = ultimiRisultati.filter((r) => r.uscita);
   const sbagliati = ultimiRisultati.filter((r) => r.errore);
   const nonTrovati = riusciti.filter((r) => !r.trovato);
-  const icona = $("esito-icona");
+  const iconaEsito = $("esito-icona");
 
   if (riusciti.length === 0) {
-    icona.className = "esito-icona errore";
-    icona.textContent = "!";
+    iconaEsito.className = "esito-icona errore";
+    iconaEsito.innerHTML = icona("attenzione");
     $("esito-titolo").textContent = "Non è andata";
     $("esito-testo").textContent = sbagliati.length > 0 ? sbagliati[0].errore : "Nessun file è stato creato.";
   } else if (nonTrovati.length > 0 || sbagliati.length > 0) {
-    icona.className = "esito-icona attenzione";
-    icona.textContent = "!";
+    iconaEsito.className = "esito-icona attenzione";
+    iconaEsito.innerHTML = icona("attenzione");
     $("esito-titolo").textContent = "Fatto, ma controlla";
     const pezzi = [];
     if (nonTrovati.length > 0) {
       pezzi.push("In " + nonTrovati.map((r) => r.nome).join(", ") + " non ho trovato il display.");
     }
     if (sbagliati.length > 0) {
-      pezzi.push(sbagliati.length + " file non sono stati elaborati (vedi Mostra dettagli).");
+      if (sbagliati.length === 1) {
+        pezzi.push("1 file non è stato elaborato (il motivo è qui sotto).");
+      } else {
+        pezzi.push(sbagliati.length + " file non sono stati elaborati (il motivo è qui sotto).");
+      }
     }
     $("esito-testo").textContent = pezzi.join(" ");
   } else {
-    icona.className = "esito-icona ok";
-    icona.textContent = "✓";
+    iconaEsito.className = "esito-icona ok";
+    iconaEsito.innerHTML = icona("spunta");
     $("esito-titolo").textContent = "Fatto";
     if (riusciti.length === 1) {
       const dove = scelte.cartella ? "nella cartella scelta." : "accanto all'originale.";
@@ -533,7 +620,48 @@ function mostraFinito(secondi) {
 
   $("btn-apri").classList.toggle("nascosto", riusciti.length !== 1);
   $("btn-mostra").classList.toggle("nascosto", riusciti.length === 0);
+  disegnaRisultati();
+  mostraImmagineFinito($("corso-img").getAttribute("src"));
   mostraSchermata("finito");
+}
+
+// elenco a destra: un file per riga, con un clic si apre
+function disegnaRisultati() {
+  const lista = $("lista-risultati");
+  lista.innerHTML = "";
+  if (ultimiRisultati.length < 2) {
+    return; // con un solo file basta il testo sopra
+  }
+  for (const r of ultimiRisultati) {
+    let meta = "Coperto";
+    let stato = '<span class="segno ok">' + icona("spunta") + "</span>";
+    if (r.errore) {
+      meta = r.errore;
+      stato = '<span class="segno errore">' + icona("x") + "</span>";
+    } else if (!r.trovato) {
+      meta = "Display non trovato: controlla";
+      stato = '<span class="segno attenzione">' + icona("attenzione") + "</span>";
+    }
+    const nome = r.uscita ? nomeDaPercorso(r.uscita) : r.nome;
+    const riga = creaRigaFile(r.uscita ? "button" : "div", { nome: nome, foto: r.foto }, meta);
+    riga.title = r.errore || "";
+    riga.insertAdjacentHTML("beforeend", stato);
+    if (r.uscita) {
+      riga.title = "Apri";
+      riga.addEventListener("click", () => tauri.opener.openPath(r.uscita));
+    }
+    lista.appendChild(riga);
+  }
+}
+
+// a sinistra nella schermata finale: l'ultimo fotogramma visto
+function mostraImmagineFinito(src) {
+  if (src) {
+    $("finito-img").src = src;
+    $("finito-img").classList.remove("nascosto");
+  } else {
+    $("finito-img").classList.add("nascosto");
+  }
 }
 
 async function apriRisultato() {
@@ -574,14 +702,16 @@ async function avvisaFine() {
 
 function mostraErrore(titolo, testo) {
   ultimiRisultati = [];
-  const icona = $("esito-icona");
-  icona.className = "esito-icona errore";
-  icona.textContent = "!";
+  const iconaEsito = $("esito-icona");
+  iconaEsito.className = "esito-icona errore";
+  iconaEsito.innerHTML = icona("attenzione");
   $("esito-titolo").textContent = titolo;
   $("esito-testo").textContent = testo;
   $("esito-tempo").textContent = "";
   $("btn-apri").classList.add("nascosto");
   $("btn-mostra").classList.add("nascosto");
+  disegnaRisultati();
+  mostraImmagineFinito(ultimaAnteprima ? ultimaAnteprima.immagine : "");
   mostraSchermata("finito");
 }
 
@@ -654,6 +784,9 @@ async function installaAggiornamento() {
 let schermataPrimaImpostazioni = "inizio";
 
 function apriImpostazioni() {
+  if (alLavoro || !$("schermata-impostazioni").classList.contains("nascosto") || !$("schermata-scegli").classList.contains("nascosto")) {
+    return;
+  }
   for (const s of ["inizio", "pronto", "finito"]) {
     if (!$("schermata-" + s).classList.contains("nascosto")) {
       schermataPrimaImpostazioni = s;
@@ -661,6 +794,14 @@ function apriImpostazioni() {
   }
   $("btn-controlla").textContent = "Controlla ora";
   mostraSchermata("impostazioni");
+}
+
+// menu a sinistra delle impostazioni: mostra una sezione alla volta
+function mostraSezioneImpostazioni(nome) {
+  for (const b of $("menu-impostazioni").querySelectorAll("button")) {
+    b.classList.toggle("attivo", b.dataset.sezione === nome);
+    $("sezione-" + b.dataset.sezione).classList.toggle("nascosto", b.dataset.sezione !== nome);
+  }
 }
 
 function chiudiImpostazioni() {
@@ -822,7 +963,6 @@ async function avvio() {
 
   // versione dell'app
   const versione = await tauri.app.getVersion();
-  $("piede-versione").textContent = "Versione " + versione;
   $("testo-versione").textContent = "Versione " + versione;
 
   // schermata 1
@@ -875,7 +1015,8 @@ async function avvio() {
   $("btn-interrompi").addEventListener("click", interrompi);
   $("btn-dettagli").addEventListener("click", () => {
     const nascosto = $("registro").classList.toggle("nascosto");
-    $("btn-dettagli").textContent = nascosto ? "▸ Mostra dettagli" : "▾ Nascondi dettagli";
+    $("btn-dettagli").classList.toggle("aperto", !nascosto);
+    $("btn-dettagli").querySelector("span").textContent = nascosto ? "Mostra dettagli" : "Nascondi dettagli";
   });
 
   // schermata 4
@@ -890,6 +1031,12 @@ async function avvio() {
   // impostazioni
   $("btn-impostazioni").addEventListener("click", apriImpostazioni);
   $("btn-fine").addEventListener("click", chiudiImpostazioni);
+  $("menu-impostazioni").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (b) {
+      mostraSezioneImpostazioni(b.dataset.sezione);
+    }
+  });
   $("interruttore-aggiornamenti").addEventListener("change", (evento) => {
     scelte.controllaAggiornamenti = evento.target.checked;
     salvaScelte();
@@ -899,9 +1046,11 @@ async function avvio() {
   $("cursore-forza").addEventListener("input", (evento) => {
     $("valore-forza").textContent = evento.target.value + " px";
   });
+  // forza e margine sono accanto all'anteprima: si vede subito il risultato
   $("cursore-forza").addEventListener("change", (evento) => {
     scelte.forza = Number(evento.target.value);
     salvaScelte();
+    caricaAnteprima();
   });
   $("scelta-margine").addEventListener("click", (evento) => {
     const b = evento.target.closest("button");
@@ -909,6 +1058,7 @@ async function avvio() {
       scelte.margine = Number(b.dataset.valore);
       aggiornaSegmentato("scelta-margine", scelte.margine);
       salvaScelte();
+      caricaAnteprima();
     }
   });
 
@@ -951,12 +1101,32 @@ async function avvio() {
   $("btn-aggiorna").addEventListener("click", installaAggiornamento);
   $("btn-dopo").addEventListener("click", () => $("avviso").classList.add("nascosto"));
 
-  // se la finestra cambia dimensione, il riquadro rosso va rimesso a posto
-  window.addEventListener("resize", () => {
+  // scorciatoie da tastiera: ⌘O apri, ⌘, impostazioni, Esc chiude
+  document.addEventListener("keydown", (evento) => {
+    const comando = evento.metaKey || evento.ctrlKey;
+    if (comando && evento.key.toLowerCase() === "o" && !alLavoro) {
+      evento.preventDefault();
+      scegliFile();
+    } else if (comando && evento.key === ",") {
+      evento.preventDefault();
+      apriImpostazioni();
+    } else if (evento.key === "Escape") {
+      if (!$("schermata-impostazioni").classList.contains("nascosto")) {
+        chiudiImpostazioni();
+      } else if (!$("schermata-scegli").classList.contains("nascosto")) {
+        mostraSchermata("impostazioni");
+      }
+    }
+  });
+
+  // se l'anteprima cambia grandezza (finestra ridimensionata, avviso che
+  // compare o sparisce), la zona tratteggiata va rimessa a posto
+  const osservatore = new ResizeObserver(() => {
     if (ultimaAnteprima) {
       posizionaZona($("anteprima-img"), $("anteprima-zona"), ultimaAnteprima.zona);
     }
   });
+  osservatore.observe($("anteprima-img"));
 
   mostraSchermata("inizio");
 

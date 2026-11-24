@@ -25,6 +25,12 @@ npm run ffmpeg
 npm run dev
 ```
 
+## Scorciatoie
+
+- **⌘O** (Ctrl+O su Windows): scegli i file
+- **⌘,** (Ctrl+, su Windows): Impostazioni
+- **Esc**: chiude le Impostazioni
+
 ## Test automatici
 
 ```bash
