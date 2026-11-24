@@ -617,3 +617,12 @@ input[type="range"] {
 .riga > .pallino + .link:last-child {
   margin-left: 0;
 }
+
+/* numero accanto alla barra della forza (es. "10 px") */
+.numero-forza {
+  flex-shrink: 0;
+  min-width: 40px;
+  text-align: right;
+  color: var(--grigio);
+  font-variant-numeric: tabular-nums;
+}

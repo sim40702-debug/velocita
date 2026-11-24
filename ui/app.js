@@ -772,6 +772,7 @@ async function avvio() {
   aggiornaSegmentato("scelta-momento", scelte.momento);
   aggiornaColori();
   $("cursore-forza").value = scelte.forza;
+  $("valore-forza").textContent = scelte.forza + " px";
   $("interruttore-aggiornamenti").checked = scelte.controllaAggiornamenti;
 
   // versione dell'app
@@ -849,6 +850,10 @@ async function avvio() {
     salvaScelte();
   });
   $("btn-controlla").addEventListener("click", () => controllaAggiornamenti(true));
+  // mentre sposti la barra il numero cambia subito
+  $("cursore-forza").addEventListener("input", (evento) => {
+    $("valore-forza").textContent = evento.target.value + " px";
+  });
   $("cursore-forza").addEventListener("change", (evento) => {
     scelte.forza = Number(evento.target.value);
     salvaScelte();
