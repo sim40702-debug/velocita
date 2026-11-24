@@ -1,0 +1,13 @@
+{
+  "name": "velocita",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "ffmpeg": "python3 scripts/prendi_ffmpeg.py"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

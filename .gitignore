@@ -1,0 +1,10 @@
+# compilazione
+target/
+node_modules/
+src-tauri/gen/
+
+# ffmpeg si scarica con: npm run ffmpeg
+src-tauri/binaries/
+
+# file del Mac
+.DS_Store

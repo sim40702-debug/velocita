@@ -1,7 +1,9 @@
-# Questo script crea Velocita.exe (Windows) e Velocita-mac.zip (Mac),
-# con dentro ffmpeg, cosi' chi lo usa non deve installarlo.
-# - Se carichi un tag tipo v1.0.0: li mette nella release del tag
-# - Se premi "Run workflow" nella pagina Actions: li trovi in fondo alla pagina del run
+# Crea l'app per Mac (Apple Silicon + Intel) e Windows, con ffmpeg dentro.
+# - Se carichi un tag tipo v1.2.3: crea la release su GitHub con gli
+#   installer e il file latest.json che serve agli aggiornamenti automatici.
+#   Il numero di versione dell'app viene preso dal tag.
+# - Se premi "Run workflow" nella pagina Actions: crea solo gli installer,
+#   li trovi in fondo alla pagina del run (per provare).
 
 name: Release
 
@@ -17,60 +19,77 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - sistema: macos-latest
+            argomenti: --target universal-apple-darwin
+            ffmpeg: universal-apple-darwin
+            cartella: target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          - sistema: windows-latest
+            argomenti: ""
+            ffmpeg: x86_64-pc-windows-msvc
+            cartella: target/release/bundle/nsis/*.exe
+    runs-on: ${{ matrix.sistema }}
 
     steps:
       - name: Scarica il codice
         uses: actions/checkout@v4
 
-      - name: Installa Python
+      - name: Installa Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Installa Python (serve per scaricare ffmpeg)
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+
+      - name: Installa Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.sistema == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Ricorda la compilazione Rust (più veloce le volte dopo)
+        uses: Swatinem/rust-cache@v2
+
+      - name: Versione dal tag e note della release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          VERSIONE="${GITHUB_REF_NAME#v}"
+          node -e "const fs=require('fs');const f='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f));c.version='$VERSIONE';fs.writeFileSync(f,JSON.stringify(c,null,2));"
+          # il messaggio del tag diventa la descrizione della novità
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          {
+            echo "NOTE<<FINE_NOTE"
+            git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)'
+            echo "FINE_NOTE"
+          } >> "$GITHUB_ENV"
 
       - name: Installa le librerie
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt customtkinter pyinstaller imageio-ffmpeg
+        run: npm ci
 
-      - name: Prendi ffmpeg (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: cp "$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" ffmpeg.exe
+      - name: Prendi ffmpeg
+        run: python scripts/prendi_ffmpeg.py ${{ matrix.ffmpeg }}
 
-      - name: Prendi ffmpeg (Mac)
-        if: runner.os == 'macOS'
-        run: |
-          cp "$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')" ffmpeg
-          chmod +x ffmpeg
+      - name: Compila e crea la release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: Velocità ${{ github.ref_name }}
+          releaseBody: ${{ env.NOTE }}
+          releaseDraft: false
+          args: ${{ matrix.argomenti }}
 
-      - name: Crea Velocita.exe
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          pyinstaller --onefile --windowed --name Velocita --collect-all customtkinter --add-binary "ffmpeg.exe;." velocita.py
-
-      - name: Crea Velocita.app e lo comprime
-        if: runner.os == 'macOS'
-        run: |
-          pyinstaller --windowed --name Velocita --collect-all customtkinter --add-binary "ffmpeg:." velocita.py
-          ditto -c -k --keepParent dist/Velocita.app dist/Velocita-mac.zip
-
-      - name: Salva i file nella pagina del run
+      - name: Salva gli installer nella pagina del run (solo prova)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
           name: Velocita-${{ runner.os }}
-          path: |
-            dist/Velocita.exe
-            dist/Velocita-mac.zip
-          if-no-files-found: ignore
-
-      - name: Carica nella release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/Velocita.exe
-            dist/Velocita-mac.zip
+          path: ${{ matrix.cartella }}

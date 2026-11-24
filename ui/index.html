@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Velocità</title>
+  <link rel="stylesheet" href="stile.css">
+</head>
+<body>
+  <main id="pagina">
+
+    <!-- AVVISO AGGIORNAMENTO (compare solo se c'è una versione nuova) -->
+    <div id="avviso" class="scheda avviso nascosto">
+      <div class="avviso-icona">↓</div>
+      <div class="avviso-testo">
+        <strong id="avviso-titolo">È disponibile una nuova versione</strong>
+        <span id="avviso-note"></span>
+      </div>
+      <div class="avviso-bottoni">
+        <button id="btn-aggiorna" class="bottone blu piccolo">Aggiorna</button>
+        <button id="btn-dopo" class="link grigio">Più tardi</button>
+      </div>
+    </div>
+
+    <!-- 1. INIZIO -->
+    <section id="schermata-inizio" class="schermata">
+      <header class="titolo">
+        <h1>Velocità</h1>
+        <p>Nasconde il numero della velocità nei video della moto.</p>
+      </header>
+      <div id="zona-trascina" class="zona-trascina">
+        <div class="icona-play">▶</div>
+        <h2>Trascina qui un video o una foto</h2>
+        <p class="grigio">Puoi trascinare anche più file insieme</p>
+        <button id="btn-scegli" class="bottone blu">Scegli file…</button>
+        <p class="formati">MP4, MOV, MKV, AVI, JPG, PNG, WEBP</p>
+      </div>
+    </section>
+
+    <!-- 2. PRONTO -->
+    <section id="schermata-pronto" class="schermata nascosto">
+      <header class="titolo">
+        <h1>Velocità</h1>
+        <p>Nasconde il numero della velocità nei video della moto.</p>
+      </header>
+
+      <div class="anteprima">
+        <img id="anteprima-img" alt="Anteprima">
+        <div id="anteprima-zona" class="zona-rossa nascosto"></div>
+        <div id="anteprima-carico" class="anteprima-messaggio">Carico l'anteprima…</div>
+      </div>
+      <input id="cursore-anteprima" type="range" min="0" max="1000" value="300">
+      <p id="testo-anteprima" class="nota">Il riquadro rosso è la zona che verrà coperta. Sposta per controllare.</p>
+
+      <div class="scheda">
+        <div class="riga">
+          <span id="etichetta-file">Video</span>
+          <span id="nome-file" class="valore"></span>
+          <button id="btn-cambia-file" class="link">Cambia</button>
+        </div>
+        <div id="lista-coda" class="lista-coda nascosto"></div>
+        <div class="riga">
+          <span>Salva in</span>
+          <span id="nome-cartella" class="valore">Accanto al video</span>
+          <button id="btn-reset-cartella" class="link grigio nascosto" title="Salva accanto al video">✕</button>
+          <button id="btn-cambia-cartella" class="link">Cambia</button>
+        </div>
+      </div>
+
+      <div class="scheda">
+        <div class="riga">
+          <span>Uso CPU</span>
+          <div id="scelta-cpu" class="segmentato">
+            <button data-valore="auto" class="attivo">Auto</button>
+            <button data-valore="0.25">25%</button>
+            <button data-valore="0.5">50%</button>
+            <button data-valore="0.75">75%</button>
+            <button data-valore="1">100%</button>
+          </div>
+        </div>
+        <div class="riga">
+          <span>Mostra i riquadri nel video (prova)</span>
+          <label class="interruttore">
+            <input id="interruttore-prova" type="checkbox">
+            <span></span>
+          </label>
+        </div>
+      </div>
+
+      <button id="btn-avvia" class="bottone blu largo">Avvia</button>
+    </section>
+
+    <!-- 3. IN CORSO -->
+    <section id="schermata-corso" class="schermata nascosto">
+      <header class="titolo">
+        <h1>Velocità</h1>
+        <p id="corso-sottotitolo">Sto lavorando…</p>
+      </header>
+
+      <div class="anteprima">
+        <img id="corso-img" alt="">
+        <div id="corso-zona" class="zona-rossa nascosto"></div>
+      </div>
+
+      <div class="avanzamento">
+        <div class="riga-testo">
+          <strong id="corso-nome"></strong>
+          <strong id="corso-percentuale">0%</strong>
+        </div>
+        <div class="barra"><div id="barra-piena"></div></div>
+        <div class="riga-testo grigio piccolo-testo">
+          <span id="corso-fotogrammi">Avvio…</span>
+          <span id="corso-mancano"></span>
+        </div>
+      </div>
+
+      <button id="btn-interrompi" class="bottone grigio-chiaro largo">Interrompi</button>
+
+      <button id="btn-dettagli" class="link grigio dettagli">▸ Mostra dettagli</button>
+      <pre id="registro" class="registro nascosto"></pre>
+    </section>
+
+    <!-- 4. FINITO -->
+    <section id="schermata-finito" class="schermata nascosto">
+      <header class="titolo">
+        <h1>Velocità</h1>
+        <p>Nasconde il numero della velocità nei video della moto.</p>
+      </header>
+      <div class="esito">
+        <div id="esito-icona" class="esito-icona ok">✓</div>
+        <h2 id="esito-titolo">Fatto</h2>
+        <p id="esito-testo" class="grigio"></p>
+        <p id="esito-tempo" class="grigio piccolo-testo"></p>
+      </div>
+      <button id="btn-apri" class="bottone blu largo">Apri video</button>
+      <button id="btn-mostra" class="bottone grigio-chiaro largo">Mostra nella cartella</button>
+      <button id="btn-altro" class="link centrato">Elabora un altro video</button>
+    </section>
+
+    <!-- 6. IMPOSTAZIONI -->
+    <section id="schermata-impostazioni" class="schermata nascosto">
+      <header class="titolo con-bottone">
+        <h1>Impostazioni</h1>
+        <button id="btn-fine" class="link grande">Fine</button>
+      </header>
+
+      <p class="sezione">AGGIORNAMENTI</p>
+      <div class="scheda">
+        <div class="riga">
+          <span>Controlla all'avvio</span>
+          <label class="interruttore">
+            <input id="interruttore-aggiornamenti" type="checkbox" checked>
+            <span></span>
+          </label>
+        </div>
+        <div class="riga">
+          <span id="testo-versione">Versione</span>
+          <button id="btn-controlla" class="link">Controlla ora</button>
+        </div>
+      </div>
+
+      <p class="sezione">COPERTURA</p>
+      <div class="scheda">
+        <div class="riga">
+          <span>Forza pixel</span>
+          <input id="cursore-forza" type="range" min="6" max="24" value="10">
+        </div>
+        <div class="riga">
+          <span>Margine attorno al numero</span>
+          <div id="scelta-margine" class="segmentato stretto">
+            <button data-valore="0.08">Piccolo</button>
+            <button data-valore="0.15" class="attivo">Normale</button>
+            <button data-valore="0.25">Grande</button>
+          </div>
+        </div>
+      </div>
+      <p class="nota">Più forza = blocchi più grandi, il numero si legge meno.</p>
+    </section>
+
+    <footer class="piede">
+      <span id="piede-versione"></span>
+      <button id="btn-impostazioni" class="link">Impostazioni</button>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
