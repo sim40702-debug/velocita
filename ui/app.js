@@ -49,6 +49,10 @@ const scelte = {
   pannelloTutti: true,   // la parte "Per tutti i video" del pannello è aperta
   volti: false,         // copre anche le facce delle persone
   lingua: "auto",       // "auto" (quella del computer), "it", "en" o "de"
+  tema: "auto",         // "auto" (come il Mac), "chiaro" o "scuro"
+  miniature: true,      // un fotogramma accanto a ogni video nella lista
+  recenti: true,        // "Fatti di recente" nella schermata iniziale
+  guidaVista: false,    // "Come funziona" è già stato mostrato
   cartellaSorvegliata: "", // i video nuovi messi qui si coprono da soli ("" = nessuna)
 };
 
@@ -81,6 +85,9 @@ function $(id) {
 function mostraSchermata(nome) {
   if (nome !== "corso") {
     togliBarraDock();
+  }
+  if (nome === "inizio") {
+    disegnaRecenti();
   }
   if (nome !== "pronto" && schermoIntero) {
     cambiaSchermoIntero();
@@ -231,10 +238,21 @@ function icona(nome) {
 function creaRigaFile(tag, file, meta) {
   const riga = document.createElement(tag);
   riga.className = "riga-file";
-  riga.innerHTML = icona(file.foto ? "foto" : "video") + '<span class="testi"><span class="nome"></span><span class="meta"></span></span>';
+  // con la miniatura (se c'è e se è scelta), altrimenti l'icona
+  const miniatura = scelte.miniature ? scegliMiniatura(file) : null;
+  const figura = miniatura ? '<img class="miniatura-riga" alt="" src="' + miniatura + '">' : icona(file.foto ? "foto" : "video");
+  riga.innerHTML = figura + '<span class="testi"><span class="nome"></span><span class="meta"></span></span>';
   riga.querySelector(".nome").textContent = file.nome;
   riga.querySelector(".meta").textContent = meta;
   return riga;
+}
+
+// la miniatura di un file per la lista: un fotogramma verso metà video
+function scegliMiniatura(file) {
+  if (!file || !file.miniature || file.miniature.length === 0) {
+    return null;
+  }
+  return file.miniature[Math.floor(file.miniature.length / 2)];
 }
 
 // 75 secondi -> "1:15"
@@ -452,7 +470,8 @@ function aggiornaSchedaFile() {
   $("btn-apri").textContent = tuttiFoto ? "Apri foto" : "Apri video";
 
   // con una foto il cursore dell'anteprima non serve
-  $("cursore-anteprima").classList.toggle("nascosto", primo.foto);
+  $("linea-tempo").classList.toggle("nascosto", primo.foto);
+  disegnaFotogrammi(primo);
   $("sotto-cursore").classList.toggle("nascosto", primo.foto);
 }
 
@@ -508,6 +527,9 @@ function disegnaCoda() {
   const lista = $("lista-coda");
   lista.innerHTML = "";
   coda.forEach((file, i) => {
+    if (scelte.miniature) {
+      chiediMiniature(file); // arrivano dopo, una alla volta
+    }
     let meta = file.foto ? "Foto" : formattaTempo(file.durata);
     if (file.taglio) {
       meta = formattaTempo(file.taglio.inizio) + " – " + formattaTempo(file.taglio.fine);
@@ -639,8 +661,13 @@ async function caricaAnteprima() {
         posizionaZona(img, $("anteprima-zona"), risposta.zona);
       }
       disegnaAltreZone();
+      // la linea del Prima / Dopo va da sola sul display (finché non la sposti tu)
+      if (!lineaSpostata) {
+        centraLineaSullaZona(risposta.zona);
+      }
     };
-    img.src = vista === "risultato" ? risposta.risultato : risposta.immagine;
+    img.src = risposta.immagine;
+    $("risultato-img").src = risposta.risultato;
     mostraInfoAnteprima(risposta);
 
     if (risposta.zona) {
@@ -666,8 +693,13 @@ async function caricaAnteprima() {
 // ANTEPRIMA: ORIGINALE / RISULTATO E SCHERMO INTERO
 // ==========================================
 
-// "originale" = il video com'è, "risultato" = già coperto
-let vista = "originale";
+// PRIMA / DOPO: dove sta la linea, da 0 a 1
+// (0 = si vede tutto il risultato, 1 = si vede tutto l'originale)
+let divisione = 0.5;
+// true quando la linea l'hai spostata tu: allora non si sposta più da sola
+let lineaSpostata = false;
+// la linea si sta trascinando
+let trascinaLinea = false;
 // le altre zone coperte nell'anteprima: facce e oggetti seguiti
 let altreZone = [];
 
@@ -692,13 +724,64 @@ function disegnaAltreZone() {
 }
 let schermoIntero = false;
 
-function cambiaVista(nuova) {
-  vista = nuova;
-  aggiornaSegmentato("scelta-vista", vista);
-  $("anteprima").classList.toggle("vista-risultato", vista === "risultato");
-  if (ultimaAnteprima) {
-    $("anteprima-img").src = vista === "risultato" ? ultimaAnteprima.risultato : ultimaAnteprima.immagine;
+// mette la linea e taglia l'immagine del risultato
+function applicaDivisione() {
+  divisione = Math.min(1, Math.max(0, divisione));
+  const percentuale = divisione * 100;
+  // il risultato si vede solo a destra della linea
+  $("risultato-img").style.clipPath = "inset(0 0 0 " + percentuale + "%)";
+  $("linea-confronto").style.left = percentuale + "%";
+  // le scritte spariscono quando non c'è posto
+  $("anteprima").classList.toggle("senza-prima", divisione < 0.12);
+  $("anteprima").classList.toggle("senza-dopo", divisione > 0.88);
+  $("linea-confronto").querySelector(".maniglia-confronto").setAttribute("aria-valuenow", Math.round(percentuale));
+}
+
+// la linea al centro della zona coperta, così taglia a metà il display
+function centraLineaSullaZona(zona) {
+  const img = $("anteprima-img");
+  if (!zona || !img.naturalWidth || !img.clientWidth) {
+    divisione = 0.5;
+  } else {
+    const g = geometriaImmagine(img);
+    divisione = (g.sinistra + (zona.x + zona.w / 2) * g.larghezza) / img.clientWidth;
   }
+  applicaDivisione();
+}
+
+// R o il menu: tutto originale oppure tutto risultato
+function cambiaVista(nuova) {
+  divisione = nuova === "risultato" ? 0 : 1;
+  lineaSpostata = true;
+  applicaDivisione();
+}
+
+function scambiaVista() {
+  cambiaVista(divisione > 0.5 ? "risultato" : "originale");
+}
+
+// trascinare la linea con il mouse o il dito
+function iniziaLinea(evento) {
+  if (evento.button !== 0) {
+    return;
+  }
+  trascinaLinea = true;
+  $("linea-confronto").setPointerCapture(evento.pointerId);
+  muoviLinea(evento);
+}
+
+function muoviLinea(evento) {
+  if (!trascinaLinea) {
+    return;
+  }
+  const r = $("anteprima").getBoundingClientRect();
+  divisione = (evento.clientX - r.left) / r.width;
+  lineaSpostata = true;
+  applicaDivisione();
+}
+
+function fineLinea() {
+  trascinaLinea = false;
 }
 
 // F o il bottone in alto a destra: l'anteprima riempie la finestra
@@ -808,6 +891,174 @@ function usaPreset(preset) {
     aggiornaSchedaFile();
   }
   caricaAnteprima();
+}
+
+// ==========================================
+// FATTI DI RECENTE (schermata iniziale)
+// ==========================================
+
+const RECENTI_MASSIMI = 10;
+
+function caricaRecenti() {
+  try {
+    return JSON.parse(localStorage.getItem("recenti") || "[]");
+  } catch (e) {
+    return [];
+  }
+}
+
+function salvaRecenti(lista) {
+  try {
+    localStorage.setItem("recenti", JSON.stringify(lista.slice(0, RECENTI_MASSIMI)));
+  } catch (e) {
+    // memoria piena: pazienza, i recenti non sono importanti
+  }
+}
+
+// rimpicciolisce un'immagine (per non riempire la memoria)
+function immaginePiccola(src, larghezza) {
+  return new Promise((fatto) => {
+    if (!src) {
+      fatto(null);
+      return;
+    }
+    const img = new Image();
+    img.onload = () => {
+      const tela = document.createElement("canvas");
+      const scala = larghezza / img.naturalWidth;
+      // ritaglio orizzontale (16:9) verso il basso, dove c'è il cruscotto
+      tela.width = larghezza;
+      tela.height = Math.round(larghezza * 9 / 16);
+      const altezzaPezzo = tela.height / scala;
+      const sopra = Math.max(0, Math.min(img.naturalHeight - altezzaPezzo, img.naturalHeight * 0.62 - altezzaPezzo / 2));
+      tela.getContext("2d").drawImage(img, 0, sopra, img.naturalWidth, altezzaPezzo, 0, 0, tela.width, tela.height);
+      fatto(tela.toDataURL("image/jpeg", 0.75));
+    };
+    img.onerror = () => fatto(null);
+    img.src = src;
+  });
+}
+
+async function salvaRecente(file, uscita) {
+  const miniatura = await immaginePiccola(file.coppia ? file.coppia.dopo : null, 320);
+  const lista = caricaRecenti().filter((r) => r.uscita !== uscita);
+  lista.unshift({
+    uscita: uscita,
+    nome: file.nome.replace(/\.[^.]+$/, ""),
+    data: Date.now(),
+    durata: file.foto ? 0 : file.taglio ? file.taglio.fine - file.taglio.inizio : file.durata,
+    foto: file.foto,
+    miniatura: miniatura,
+  });
+  salvaRecenti(lista);
+}
+
+// "oggi", "ieri", "22 nov"
+function testoData(ms) {
+  const giorno = new Date(ms);
+  const oggi = new Date();
+  const inizioOggi = new Date(oggi.getFullYear(), oggi.getMonth(), oggi.getDate()).getTime();
+  if (ms >= inizioOggi) {
+    return t("oggi");
+  }
+  if (ms >= inizioOggi - 86400000) {
+    return t("ieri");
+  }
+  return giorno.toLocaleDateString(lingua === "it" ? "it-CH" : lingua === "de" ? "de-CH" : "en-GB", { day: "numeric", month: "short" });
+}
+
+function disegnaRecenti() {
+  const lista = caricaRecenti().slice(0, 5);
+  $("recenti").classList.toggle("nascosto", !scelte.recenti || lista.length === 0);
+  const contenitore = $("lista-recenti");
+  contenitore.innerHTML = "";
+  for (const r of lista) {
+    const scheda = document.createElement("button");
+    scheda.className = "scheda-recente";
+    scheda.title = t("Apri");
+    const figura = r.miniatura ? '<img alt="" src="' + r.miniatura + '">' : '<span class="senza-figura">' + icona(r.foto ? "foto" : "video") + "</span>";
+    scheda.innerHTML = figura + '<span class="coperto"><i></i>' + t("Coperto") + '</span><span class="titolo"></span><span class="meta"></span>';
+    scheda.querySelector(".titolo").textContent = r.nome;
+    scheda.querySelector(".meta").textContent = testoData(r.data) + (r.durata ? " · " + formattaTempo(r.durata) : "");
+    scheda.addEventListener("click", () => apriRecente(r));
+    contenitore.appendChild(scheda);
+  }
+}
+
+async function apriRecente(r) {
+  try {
+    await tauri.opener.openPath(r.uscita);
+  } catch (e) {
+    // il file non c'è più (spostato o cancellato): si toglie dall'elenco
+    salvaRecenti(caricaRecenti().filter((x) => x.uscita !== r.uscita));
+    disegnaRecenti();
+  }
+}
+
+// ==========================================
+// "COME FUNZIONA" (primo avvio)
+// ==========================================
+
+const PASSI_GUIDA = [
+  {
+    titolo: "Trascina i video della moto",
+    testo: "Velocità trova il display in ogni fotogramma e copre il numero della velocità. I video restano sul tuo computer.",
+    figura: '<img class="guida-icona" src="icona.png" alt="">',
+  },
+  {
+    titolo: "La striscia ti dice dove guardare",
+    testo: "Verde: coperto. Arancione e rosso: da controllare. Con le frecce vai a ogni tratto: «Va bene così» o «Copri a mano», e diventa verde.",
+    figura: '<span class="guida-striscia"><i style="flex:12" class="v"></i><i style="flex:2" class="r"></i><i style="flex:20" class="v"></i><i style="flex:2" class="g"></i><i style="flex:14" class="v"></i></span>',
+  },
+  {
+    titolo: "Avvia e il video è pronto",
+    testo: "Il video coperto arriva accanto all'originale, con «_speed_blur» nel nome. Lo apri subito in DaVinci.",
+    figura: '<span class="guida-file"><b>Lago Maggiore.mp4</b><b class="nuovo">Lago Maggiore_speed_blur.mp4</b></span>',
+  },
+];
+let passoGuida = -1;
+
+function mostraGuida() {
+  passoGuida = 0;
+  $("guida").classList.remove("nascosto");
+  disegnaPassoGuida();
+  $("guida-avanti").focus();
+}
+
+function disegnaPassoGuida() {
+  const passo = PASSI_GUIDA[passoGuida];
+  $("guida-numero").textContent = t("{n} di {totale}", { n: passoGuida + 1, totale: PASSI_GUIDA.length });
+  $("guida-titolo").textContent = t(passo.titolo);
+  $("guida-testo").textContent = t(passo.testo);
+  $("guida-figura").innerHTML = passo.figura;
+  $("guida-puntini").innerHTML = PASSI_GUIDA.map((_, i) => '<i class="' + (i === passoGuida ? "attivo" : "") + '"></i>').join("");
+  $("guida-avanti").textContent = passoGuida === PASSI_GUIDA.length - 1 ? t("Inizia") : t("Avanti");
+}
+
+function avantiGuida() {
+  if (passoGuida < PASSI_GUIDA.length - 1) {
+    passoGuida++;
+    disegnaPassoGuida();
+  } else {
+    chiudiGuida();
+  }
+}
+
+function chiudiGuida() {
+  passoGuida = -1;
+  $("guida").classList.add("nascosto");
+  scelte.guidaVista = true;
+  salvaScelte();
+}
+
+// ==========================================
+// TEMA: CHIARO, SCURO O COME IL MAC
+// ==========================================
+
+function applicaTema() {
+  document.documentElement.dataset.tema = scelte.tema;
+  aggiornaSegmentato("scelta-tema", scelte.tema);
+  disegnaStriscia(); // la striscia usa i colori del tema
 }
 
 // ==========================================
@@ -974,6 +1225,7 @@ async function avvia(automatico) {
       }
       // quanti tratti rossi c'erano (per dire «controlla» nel rapporto)
       const rossi = file.copertura && file.copertura.finito ? trattiNelTaglio(file, 0) : 0;
+      salvaRecente(file, risultato.uscita);
       ultimiRisultati.push({ file: file, nome: file.nome, foto: file.foto, uscita: risultato.uscita, trovato: risultato.trovato, rossi: rossi, errore: null, secondi: risultato.secondi });
       scriviRegistro(t("Salvato:") + " " + risultato.uscita + " (" + formattaTempo(risultato.secondi) + ")");
       if (!risultato.trovato) {
@@ -1037,7 +1289,7 @@ function preparaSchermataCorso(file, indice) {
   disegnaCodaCorso(indice);
   $("corso-nome").textContent = file.nome;
   $("corso-percentuale").textContent = "0%";
-  $("barra-piena").style.width = "0%";
+  aggiornaBarraPixel(0);
   $("corso-fotogrammi").textContent = "Avvio…";
   $("corso-mancano").textContent = "";
   $("corso-sottotitolo").textContent =
@@ -1046,12 +1298,13 @@ function preparaSchermataCorso(file, indice) {
   $("btn-interrompi").textContent = "Interrompi";
 
   // immagine del file in lavorazione (quella dell'anteprima, se è lo stesso)
+  // si vede già coperto, come sarà il video finito
   const img = $("corso-img");
+  $("corso-zona").classList.add("nascosto");
   if (indice === indiceAnteprima && ultimaAnteprima) {
-    img.onload = () => posizionaZona(img, $("corso-zona"), ultimaAnteprima.zona);
-    img.src = ultimaAnteprima.immagine;
+    img.src = ultimaAnteprima.risultato;
+    file.coppia = { prima: ultimaAnteprima.immagine, dopo: ultimaAnteprima.risultato, zona: ultimaAnteprima.zona };
   } else {
-    $("corso-zona").classList.add("nascosto");
     img.removeAttribute("src"); // niente immagine del video di prima
     invoke("anteprima", {
       percorso: file.percorso,
@@ -1059,23 +1312,42 @@ function preparaSchermataCorso(file, indice) {
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
       display: sceltaDisplay(file),
+      fisse: file.zoneFisse || [],
     })
       .then((r) => {
-        if (fileInCorso !== indice) {
-          return;
+        file.coppia = { prima: r.immagine, dopo: r.risultato, zona: r.zona };
+        if (fileInCorso === indice) {
+          img.src = r.risultato;
         }
-        img.onload = () => posizionaZona(img, $("corso-zona"), r.zona);
-        img.src = r.immagine;
       })
       .catch(() => {});
   }
+}
+
+// la barra fatta di 24 quadratini: si riempiono man mano
+const QUADRATINI = 24;
+
+function aggiornaBarraPixel(percentuale) {
+  const barra = $("barra-pixel");
+  if (barra.children.length !== QUADRATINI) {
+    barra.innerHTML = "";
+    for (let i = 0; i < QUADRATINI; i++) {
+      barra.appendChild(document.createElement("i"));
+    }
+  }
+  const pieni = (percentuale / 100) * QUADRATINI;
+  [...barra.children].forEach((q, i) => {
+    q.classList.toggle("pieno", i < Math.floor(pieni));
+    // quello che si sta riempiendo è a metà
+    q.classList.toggle("mezzo", i === Math.floor(pieni) && pieni < QUADRATINI);
+  });
 }
 
 // arriva da Rust mentre lavora
 tauri.event.listen("avanzamento", (evento) => {
   const a = evento.payload;
   const percentuale = a.totali > 0 ? Math.min(100, Math.floor((a.fatti / a.totali) * 100)) : 0;
-  $("barra-piena").style.width = percentuale + "%";
+  aggiornaBarraPixel(percentuale);
   $("corso-percentuale").textContent = percentuale + "%";
   // sull'icona: quanto manca a tutta la coda, non solo a questo file
   if (a.totali > 0 && coda.length > 0) {
@@ -1152,8 +1424,9 @@ function mostraFinito(secondi) {
     pezzi.push(t("Con «Correggi» torni al video e lo sistemi."));
     $("esito-testo").textContent = pezzi.join(" ");
   } else {
-    iconaEsito.className = "esito-icona ok";
-    iconaEsito.innerHTML = icona("spunta");
+    iconaEsito.className = "esito-icona ok pixel";
+    // la spunta fatta di quadratini (si compone una volta, piano piano)
+    iconaEsito.innerHTML = '<span class="spunta-pixel"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>';
     $("esito-titolo").textContent = "Fatto";
     if (riusciti.length === 1) {
       const nome = nomeDaPercorso(riusciti[0].uscita);
@@ -1170,7 +1443,9 @@ function mostraFinito(secondi) {
   $("btn-mostra").classList.toggle("nascosto", riusciti.length === 0);
   disegnaRisultati();
   // se non è riuscito niente, l'immagine non serve (potrebbe confondere)
-  mostraImmagineFinito(riusciti.length > 0 ? $("corso-img").getAttribute("src") : "");
+  // il prima / dopo dell'ultimo video riuscito (se non è riuscito niente, nessuna immagine)
+  const ultimo = riusciti.length > 0 ? riusciti[riusciti.length - 1].file : null;
+  mostraImmagineFinito(ultimo && ultimo.coppia ? ultimo.coppia : null);
   mostraSchermata("finito");
 }
 
@@ -1200,7 +1475,7 @@ function disegnaRisultati() {
       correggi = true;
     }
     const nome = r.uscita ? nomeDaPercorso(r.uscita) : r.nome;
-    const riga = creaRigaFile("div", { nome: nome, foto: r.foto }, meta);
+    const riga = creaRigaFile("div", { nome: nome, foto: r.foto, miniature: r.file ? r.file.miniature : null }, meta);
     riga.title = r.errore || "";
 
     // i bottoni della riga, scritti per bene (non solo nascosti nel clic)
@@ -1245,13 +1520,49 @@ function tornaAiVideo() {
 }
 
 // a sinistra nella schermata finale: l'ultimo fotogramma visto
-function mostraImmagineFinito(src) {
-  if (src) {
-    $("finito-img").src = src;
-    $("finito-img").classList.remove("nascosto");
-  } else {
-    $("finito-img").classList.add("nascosto");
+// a sinistra della schermata finale: prima / dopo (coppia = { prima, dopo })
+function mostraImmagineFinito(coppia) {
+  const c = coppia || null;
+  $("finito-prima").classList.toggle("nascosto", !c);
+  $("finito-img").classList.toggle("nascosto", !c);
+  $("finito-linea").classList.toggle("nascosto", !c);
+  if (c) {
+    const prima = $("finito-prima");
+    // la linea va sul display, così si vede bene la differenza
+    prima.onload = () => {
+      divisioneFinito = 0.5;
+      if (c.zona && prima.clientWidth) {
+        const g = geometriaImmagine(prima);
+        divisioneFinito = (g.sinistra + (c.zona.x + c.zona.w / 2) * g.larghezza) / prima.clientWidth;
+      }
+      applicaDivisioneFinito();
+    };
+    prima.src = c.prima;
+    $("finito-img").src = c.dopo;
+    divisioneFinito = 0.5;
+    applicaDivisioneFinito();
   }
+}
+
+// la linea del prima / dopo nella schermata finale
+let divisioneFinito = 0.5;
+let trascinaFinito = false;
+
+function applicaDivisioneFinito() {
+  divisioneFinito = Math.min(1, Math.max(0, divisioneFinito));
+  $("finito-img").style.clipPath = "inset(0 0 0 " + divisioneFinito * 100 + "%)";
+  $("finito-linea").style.left = divisioneFinito * 100 + "%";
+  $("finito-anteprima").classList.toggle("senza-prima", divisioneFinito < 0.12);
+  $("finito-anteprima").classList.toggle("senza-dopo", divisioneFinito > 0.88);
+}
+
+function muoviLineaFinito(evento) {
+  if (!trascinaFinito) {
+    return;
+  }
+  const r = $("finito-anteprima").getBoundingClientRect();
+  divisioneFinito = (evento.clientX - r.left) / r.width;
+  applicaDivisioneFinito();
 }
 
 async function apriRisultato() {
@@ -1305,7 +1616,7 @@ function mostraErrore(titolo, testo, dettagli) {
   $("btn-mostra").classList.add("nascosto");
   disegnaRisultati();
   // l'immagine di un altro video confonderebbe: qui non se ne mostra nessuna
-  mostraImmagineFinito("");
+  mostraImmagineFinito(null);
   mostraSchermata("finito");
 }
 
@@ -1426,8 +1737,8 @@ function chiudiImpostazioni() {
 // ==========================================
 
 // colore di ogni stato: 0 non trovato, 1 da controllare, 2 coperto
-// 3 = coperto con una zona disegnata a mano
-const COLORI_STRISCIA = ["--rosso", "--ambra", "--verde", "--blu"];
+// 3 = coperto con una zona disegnata a mano: è verde anche lui (è a posto)
+const COLORI_STRISCIA = ["--rosso", "--ambra", "--verde", "--verde"];
 // il video che si sta analizzando adesso ("" = nessuno)
 let analisiInCorso = "";
 
@@ -1543,8 +1854,19 @@ function statiEffettivi(file) {
   const totale = Math.max(c.totali, c.stati.length);
   return c.stati.map((stato, i) => {
     const meta = ((i + 0.5) / totale) * file.durata; // il secondo a metà del punto
-    return zonaFissaA(file, meta) ? 3 : stato;
+    if (zonaFissaA(file, meta)) {
+      return 3; // coperto con una zona a mano
+    }
+    if (stato < 2 && confermato(file, meta)) {
+      return 2; // hai detto «Va bene così»: è verde
+    }
+    return stato;
   });
+}
+
+// true se in quel secondo hai detto «Va bene così»
+function confermato(file, secondi) {
+  return (file.confermati || []).some((c) => secondi >= c.inizio && secondi <= c.fine);
 }
 
 // come contaTratti, ma conta solo quelli dentro il pezzo da salvare
@@ -1718,24 +2040,131 @@ function disegnaStriscia() {
     if (mancanti > 0) {
       pezzi.push('<span><i class="rosso"></i><b class="simbolo">✕</b>' + t("Non trovato") + " · " + testoTratti(mancanti) + "</span>");
     }
-    pezzi.push("<span>Clicca sulla striscia o usa le frecce per andarci</span>");
   }
-  const aMano = (file.zoneFisse || []).filter((z) => !z.segui).length;
-  const seguiti = (file.zoneFisse || []).length - aMano;
-  if (aMano > 0) {
-    pezzi.push('<span><i style="background:var(--blu)"></i><b class="simbolo">✎</b>' + t("A mano") + " · " + (aMano === 1 ? t("1 zona") : t("{n} zone", { n: aMano })) + "</span>");
-  }
+  const seguiti = (file.zoneFisse || []).filter((z) => z.segui).length;
   if (seguiti > 0) {
     pezzi.push('<span><b class="simbolo">↝</b>' + t("Segue") + " · " + (seguiti === 1 ? t("1 oggetto") : t("{n} oggetti", { n: seguiti })) + "</span>");
   }
-  if (mancanti > 0) {
-    pezzi.push('<button id="btn-legenda-fissa" class="link">Copri a mano un tratto rosso</button>');
-  }
   legenda.innerHTML = pezzi.join("");
-  if ($("btn-legenda-fissa")) {
-    $("btn-legenda-fissa").addEventListener("click", copriPrimoRosso);
+  aggiornaBarraProblemi();
+}
+
+// ==========================================
+// TRATTI DA CONTROLLARE (barra sotto la striscia)
+// ==========================================
+
+// i tratti rossi e arancioni ancora da sistemare, dentro il pezzo da salvare:
+// [{ inizio, fine, stato }] in secondi
+function elencoProblemi(file) {
+  const c = file && file.copertura;
+  if (!c || !c.finito || file.foto) {
+    return [];
+  }
+  const stati = statiEffettivi(file);
+  const totale = Math.max(c.totali, c.stati.length);
+  const lista = [];
+  for (let i = 0; i < stati.length; i++) {
+    if (stati[i] >= 2 || !dentroTaglio(file, i)) {
+      continue;
+    }
+    const inizio = (i / totale) * file.durata;
+    const fine = ((i + 1) / totale) * file.durata;
+    const ultimo = lista[lista.length - 1];
+    // stesso colore e attaccato al precedente: è lo stesso tratto
+    if (ultimo && ultimo.stato === stati[i] && Math.abs(ultimo.fine - inizio) < 0.01) {
+      ultimo.fine = fine;
+    } else {
+      lista.push({ inizio: inizio, fine: fine, stato: stati[i] });
+    }
+  }
+  return lista;
+}
+
+// il tratto dove sta il cursore adesso (null = nessuno)
+function problemaAttuale(file, lista) {
+  const ora = secondiCursore(file);
+  return lista.find((p) => ora >= p.inizio - 0.3 && ora <= p.fine + 0.3) || null;
+}
+
+function aggiornaBarraProblemi() {
+  const file = coda[indiceAnteprima];
+  const barra = $("barra-problemi");
+  if (!file || file.foto || !file.copertura || !file.copertura.finito || regolazioneAperta) {
+    barra.classList.add("nascosto");
+    return;
+  }
+  const lista = elencoProblemi(file);
+  barra.classList.remove("nascosto");
+  barra.classList.toggle("tutto-verde", lista.length === 0);
+  if (lista.length === 0) {
+    $("problemi-testo").textContent = t("Tutto verde: non c'è niente da controllare.");
+    return;
+  }
+  const attuale = problemaAttuale(file, lista);
+  $("problemi-testo").textContent = lista.length === 1 ? t("1 tratto da controllare") : t("{n} tratti da controllare", { n: lista.length });
+  $("problemi-numero").textContent = attuale ? t("{n} di {totale}", { n: lista.indexOf(attuale) + 1, totale: lista.length }) : "–";
+  barra.classList.toggle("su-un-tratto", Boolean(attuale));
+  barra.classList.toggle("rosso", Boolean(attuale && attuale.stato === 0));
+  $("btn-va-bene").disabled = !attuale;
+  $("btn-copri-tratto").disabled = !attuale;
+}
+
+// ‹ ›: al tratto prima o dopo (dall'ultimo si ricomincia dal primo)
+function vaiAlProblemaVicino(avanti) {
+  const file = coda[indiceAnteprima];
+  const lista = elencoProblemi(file);
+  if (lista.length === 0) {
+    aggiornaBarraProblemi();
+    return;
+  }
+  const ora = secondiCursore(file);
+  const attuale = problemaAttuale(file, lista);
+  let scelto;
+  if (avanti) {
+    scelto = lista.find((p) => p.inizio > (attuale ? attuale.fine : ora)) || lista[0];
+  } else {
+    const prima = lista.filter((p) => p.fine < (attuale ? attuale.inizio : ora));
+    scelto = prima[prima.length - 1] || lista[lista.length - 1];
+  }
+  // il cursore va a metà del tratto, così vedi bene il punto
+  vaiAlPunto((scelto.inizio + scelto.fine) / 2 / file.durata);
+  aggiornaBarraProblemi();
+}
+
+// «Va bene così»: qui il numero non si vede comunque, il tratto diventa verde
+function vaBeneCosi() {
+  const file = coda[indiceAnteprima];
+  const attuale = problemaAttuale(file, elencoProblemi(file));
+  if (!attuale) {
+    return;
+  }
+  file.confermati = file.confermati || [];
+  file.confermati.push({ inizio: attuale.inizio, fine: attuale.fine });
+  dopoUnTrattoSistemato();
+}
+
+// dopo «Va bene così»: tutto si aggiorna e si va al prossimo tratto
+function dopoUnTrattoSistemato() {
+  disegnaStriscia();
+  disegnaZoneFisse();
+  disegnaCodaSeFerma();
+  const file = coda[indiceAnteprima];
+  if (elencoProblemi(file).length > 0) {
+    vaiAlProblemaVicino(true);
+  } else {
+    aggiornaBarraProblemi();
   }
 }
+
+// «Annulla» nel pannello: i tratti «Va bene così» tornano come prima
+function annullaConfermati() {
+  const file = coda[indiceAnteprima];
+  file.confermati = [];
+  disegnaStriscia();
+  disegnaZoneFisse();
+  disegnaCodaSeFerma();
+}
+
 
 // righe oblique sui tratti arancioni, trattini sui tratti rossi
 function disegnaMotivi(ctx, stati, passo, altezza) {
@@ -1772,15 +2201,18 @@ function disegnaMotivi(ctx, stati, passo, altezza) {
   ctx.restore();
 }
 
-// i segni [ e ] sulla striscia: dove inizia e finisce il pezzo salvato
+// sulla linea del tempo: la cornice ambra del pezzo da salvare,
+// con la parte che non si salva più scura
 function aggiornaSegniTaglio(file) {
-  const conTaglio = file.taglio && file.durata > 0;
-  $("segno-inizio").classList.toggle("nascosto", !conTaglio);
-  $("segno-fine").classList.toggle("nascosto", !conTaglio);
-  if (conTaglio) {
-    $("segno-inizio").style.left = (file.taglio.inizio / file.durata) * 100 + "%";
-    $("segno-fine").style.left = (file.taglio.fine / file.durata) * 100 + "%";
-  }
+  const durata = file.durata || 1;
+  const inizio = file.taglio ? file.taglio.inizio / durata : 0;
+  const fine = file.taglio ? file.taglio.fine / durata : 1;
+  $("fuori-prima").style.width = inizio * 100 + "%";
+  $("fuori-dopo").style.left = fine * 100 + "%";
+  $("fuori-dopo").style.width = (1 - fine) * 100 + "%";
+  $("cornice-taglio").style.left = inizio * 100 + "%";
+  $("cornice-taglio").style.width = (fine - inizio) * 100 + "%";
+  $("linea-tempo").classList.toggle("con-taglio", Boolean(file.taglio));
 }
 
 // clic sulla striscia: l'anteprima va in quel punto del video
@@ -1828,9 +2260,6 @@ function apriZonaFissa(indice) {
   const file = coda[indiceAnteprima];
   if (!file || file.foto || regolazioneAperta || !ultimaAnteprima) {
     return;
-  }
-  if (vista === "risultato") {
-    cambiaVista("originale");
   }
   file.zoneFisse = file.zoneFisse || [];
   let zona;
@@ -1910,6 +2339,10 @@ function confermaZonaFissa() {
   }
   chiudiRegolazione();
   dopoZoneFisse();
+  // una zona nuova su un tratto da controllare: si passa al prossimo
+  if (f.indice < 0 && !nuova.segui && elencoProblemi(file).length > 0) {
+    vaiAlProblemaVicino(true);
+  }
 }
 
 function eliminaZonaFissa(indice) {
@@ -1937,6 +2370,22 @@ function disegnaZoneFisse() {
   const zone = file && !file.foto ? file.zoneFisse || [] : [];
   $("riga-fisse").classList.toggle("nascosto", !file || file.foto);
   $("testo-fisse").textContent = zone.length === 0 ? "Nessuna" : zone.length === 1 ? t("1 zona") : t("{n} zone", { n: zone.length });
+  // i tratti segnati «Va bene così», con il modo di annullarli
+  const confermati = file && !file.foto ? (file.confermati || []).length : 0;
+  if (confermati > 0) {
+    const riga = document.createElement("div");
+    riga.className = "riga-fissa";
+    const testo = document.createElement("span");
+    testo.className = "confermati";
+    testo.textContent = confermati === 1 ? t("1 tratto «Va bene così»") : t("{n} tratti «Va bene così»", { n: confermati });
+    const annulla = document.createElement("button");
+    annulla.className = "link";
+    annulla.textContent = "Annulla";
+    annulla.addEventListener("click", annullaConfermati);
+    riga.appendChild(testo);
+    riga.appendChild(annulla);
+    lista.appendChild(riga);
+  }
   zone.forEach((z, i) => {
     const riga = document.createElement("div");
     riga.className = "riga-fissa";
@@ -1966,17 +2415,125 @@ function disegnaZoneFisse() {
   });
 }
 
-// "Copri a mano un tratto rosso": va sul primo e apre il disegno
-function copriPrimoRosso() {
-  const file = coda[indiceAnteprima];
-  const rossi = iniziTratti(file, 0);
-  if (rossi.length === 0) {
+// ==========================================
+// LINEA DEL TEMPO: FOTOGRAMMI E MANIGLIE DEL TAGLIO
+// ==========================================
+
+// quanti fotogrammi piccoli nella linea del tempo
+const NUMERO_FOTOGRAMMI = 12;
+// i file che aspettano le miniature (si chiedono una alla volta)
+let fileMiniature = [];
+let miniatureInCorso = false;
+
+// chiede le miniature di un file (una volta sola)
+function chiediMiniature(file) {
+  if (!file || file.miniature || fileMiniature.includes(file)) {
     return;
   }
-  $("cursore-anteprima").value = Math.round(rossi[0] * 1000);
-  aggiornaTempoCursore();
-  // la zona di partenza: l'ultima trovata dal programma in questo video
-  caricaAnteprima().then(() => apriZonaFissa(-1));
+  fileMiniature.push(file);
+  prossimeMiniature();
+}
+
+async function prossimeMiniature() {
+  if (miniatureInCorso || fileMiniature.length === 0) {
+    return;
+  }
+  // prima quello mostrato nell'anteprima
+  const mostrato = coda[indiceAnteprima];
+  const file = fileMiniature.includes(mostrato) ? mostrato : fileMiniature[0];
+  fileMiniature = fileMiniature.filter((f) => f !== file);
+  miniatureInCorso = true;
+  try {
+    file.miniature = await invoke("miniature", {
+      percorso: file.percorso,
+      quante: file.foto ? 1 : NUMERO_FOTOGRAMMI,
+      altezza: 96,
+    });
+  } catch (e) {
+    file.miniature = []; // niente miniature: resta l'icona
+  }
+  miniatureInCorso = false;
+  if (file === coda[indiceAnteprima]) {
+    disegnaFotogrammi(file);
+  }
+  disegnaCodaSeFerma();
+  prossimeMiniature();
+}
+
+// la fila di fotogrammi della linea del tempo
+function disegnaFotogrammi(file) {
+  const contenitore = $("fotogrammi");
+  contenitore.innerHTML = "";
+  if (!file || file.foto) {
+    return;
+  }
+  if (!file.miniature) {
+    chiediMiniature(file);
+  }
+  for (let i = 0; i < NUMERO_FOTOGRAMMI; i++) {
+    const src = file.miniature ? file.miniature[i] : null;
+    if (src) {
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = "";
+      contenitore.appendChild(img);
+    } else {
+      const vuoto = document.createElement("span");
+      vuoto.className = "fotogramma-vuoto";
+      contenitore.appendChild(vuoto);
+    }
+  }
+  aggiornaSegniTaglio(file);
+}
+
+// trascinare le maniglie [ ] del pezzo da salvare
+let manigliaTaglio = null;
+
+function iniziaManiglia(evento) {
+  const file = coda[indiceAnteprima];
+  if (!file || file.foto || evento.button !== 0) {
+    return;
+  }
+  evento.preventDefault();
+  evento.stopPropagation();
+  manigliaTaglio = evento.target.id === "maniglia-inizio" ? "inizio" : "fine";
+  evento.target.setPointerCapture(evento.pointerId);
+}
+
+function muoviManiglia(evento) {
+  const file = coda[indiceAnteprima];
+  if (!manigliaTaglio || !file) {
+    return;
+  }
+  const r = $("linea-tempo").getBoundingClientRect();
+  const secondi = Math.min(1, Math.max(0, (evento.clientX - r.left) / r.width)) * file.durata;
+  const taglio = file.taglio ? Object.assign({}, file.taglio) : { inizio: 0, fine: file.durata };
+  // il pezzo dura almeno 1 secondo
+  if (manigliaTaglio === "inizio") {
+    taglio.inizio = Math.min(secondi, taglio.fine - 1);
+  } else {
+    taglio.fine = Math.max(secondi, taglio.inizio + 1);
+  }
+  file.taglio = taglio;
+  aggiornaSegniTaglio(file);
+  aggiornaTaglio();
+  // l'anteprima va dove sta la maniglia, così vedi il fotogramma
+  vaiAlPunto((manigliaTaglio === "inizio" ? taglio.inizio : taglio.fine) / file.durata);
+}
+
+function fineManiglia() {
+  const file = coda[indiceAnteprima];
+  if (!manigliaTaglio || !file) {
+    return;
+  }
+  manigliaTaglio = null;
+  // tutto il video: niente taglio
+  if (file.taglio && file.taglio.inizio < 0.2 && file.taglio.fine > file.durata - 0.2) {
+    file.taglio = null;
+  }
+  aggiornaSchedaFile();
+  disegnaStriscia();
+  disegnaCodaSeFerma();
 }
 
 // ==========================================
@@ -2025,6 +2582,7 @@ function aggiornaTaglio() {
   if (!file || file.foto) {
     return;
   }
+  aggiornaSegniTaglio(file);
   if (file.taglio) {
     $("testo-parte").textContent = formattaTempo(file.taglio.inizio) + " – " + formattaTempo(file.taglio.fine);
   } else {
@@ -2033,8 +2591,10 @@ function aggiornaTaglio() {
   $("btn-tutto-video").classList.toggle("nascosto", !file.taglio);
 }
 
-// "1:12 / 3:04" sotto il cursore
+// "1:12 / 3:04" sotto il cursore (e la linea del punto attuale)
 function aggiornaTempoCursore() {
+  $("testina").style.left = Number($("cursore-anteprima").value) / 10 + "%";
+  aggiornaBarraProblemi();
   const file = coda[indiceAnteprima];
   if (!file || file.foto) {
     return;
@@ -2249,9 +2809,6 @@ let valeRegolazione = "questo";
 function apriRegolazione() {
   if (regolazioneAperta) {
     return;
-  }
-  if (vista === "risultato") {
-    cambiaVista("originale"); // per regolare serve vedere il numero
   }
   // qui vale una zona disegnata a mano: si modifica quella
   const file = coda[indiceAnteprima];
@@ -2597,6 +3154,14 @@ function tastoPremuto(evento) {
   const comando = evento.metaKey || evento.ctrlKey;
   const bersaglio = evento.target;
 
+  // "Come funziona": Esc chiude, Invio va avanti
+  if (passoGuida >= 0) {
+    if (tasto === "Escape") {
+      chiudiGuida();
+    }
+    return;
+  }
+
   // con la domanda aperta valgono solo Invio ed Esc
   if (rispostaDialogo) {
     if (tasto === "Escape") {
@@ -2690,7 +3255,7 @@ function tastoPremuto(evento) {
     return;
   }
   if (tasto.toLowerCase() === "r" && !evento.altKey) {
-    cambiaVista(vista === "risultato" ? "originale" : "risultato");
+    scambiaVista();
     return;
   }
   if (!file || file.foto) {
@@ -2824,7 +3389,7 @@ async function creaMenuMac() {
         await voce("Guarda 3 secondi", undefined, () => suSchermata("pronto") && avviaAnimazione()),
         await voce("Regola la zona…", undefined, () => suSchermata("pronto") && apriRegolazione()),
         await voce("Copri a mano qui…", undefined, () => suSchermata("pronto") && apriZonaFissa(-1)),
-        await voce("Originale / Risultato", undefined, () => suSchermata("pronto") && cambiaVista(vista === "risultato" ? "originale" : "risultato")),
+        await voce("Originale / Risultato", undefined, () => suSchermata("pronto") && scambiaVista()),
         await voce("Schermo intero", undefined, () => suSchermata("pronto") && cambiaSchermoIntero()),
         await fisso("Separator"),
         await voce("Inizio del pezzo qui", undefined, () => suSchermata("pronto") && segnaTaglio(true)),
@@ -2838,7 +3403,7 @@ async function creaMenuMac() {
     });
     const aiuto = await Submenu.new({
       text: t("Aiuto"),
-      items: [await voce("Scorciatoie da tastiera", undefined, mostraScorciatoie)],
+      items: [await voce("Come funziona", undefined, mostraGuida), await voce("Scorciatoie da tastiera", undefined, mostraScorciatoie)],
     });
     const menu = await Menu.new({ items: [app, archivio, modifica, video, finestra, aiuto] });
     await menu.setAsAppMenu();
@@ -2871,6 +3436,7 @@ async function avvio() {
   // la lingua: prima di tutto, così le scritte sono subito giuste
   scegliLingua(scelte.lingua);
   traduciPagina();
+  applicaTema();
 
   // mette i valori salvati nei controlli
   mettiScelteNeiControlli();
@@ -3083,6 +3649,47 @@ async function avvio() {
     aggiornaPannelloTutti();
   });
   $("btn-copia").addEventListener("click", copiaDettagli);
+  // aspetto
+  $("scelta-tema").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (b) {
+      scelte.tema = b.dataset.valore;
+      salvaScelte();
+      applicaTema();
+    }
+  });
+  $("interruttore-miniature").checked = scelte.miniature;
+  $("interruttore-miniature").addEventListener("change", (evento) => {
+    scelte.miniature = evento.target.checked;
+    salvaScelte();
+    disegnaCoda();
+  });
+  $("interruttore-recenti").checked = scelte.recenti;
+  $("interruttore-recenti").addEventListener("change", (evento) => {
+    scelte.recenti = evento.target.checked;
+    salvaScelte();
+    disegnaRecenti();
+  });
+  $("btn-svuota-recenti").addEventListener("click", () => {
+    salvaRecenti([]);
+    disegnaRecenti();
+  });
+  // "Come funziona"
+  $("guida-avanti").addEventListener("click", avantiGuida);
+  $("guida-salta").addEventListener("click", chiudiGuida);
+  $("btn-come-funziona").addEventListener("click", () => {
+    chiudiImpostazioni();
+    mostraGuida();
+  });
+  // prima / dopo nella schermata finale
+  $("finito-linea").addEventListener("pointerdown", (evento) => {
+    trascinaFinito = true;
+    $("finito-linea").setPointerCapture(evento.pointerId);
+    muoviLineaFinito(evento);
+  });
+  $("finito-linea").addEventListener("pointermove", muoviLineaFinito);
+  $("finito-linea").addEventListener("pointerup", () => (trascinaFinito = false));
+  $("finito-linea").addEventListener("pointercancel", () => (trascinaFinito = false));
   // cartella sorvegliata
   $("btn-scegli-sorvegliata").addEventListener("click", scegliSorvegliata);
   // lingua: se non stai lavorando cambia subito, se no al prossimo avvio
@@ -3105,6 +3712,18 @@ async function avvio() {
   aggiornaSorvegliata();
   setInterval(controllaSorvegliata, 10000);
   $("btn-schermo").addEventListener("click", cambiaSchermoIntero);
+  // tratti da controllare
+  $("btn-problema-prima").addEventListener("click", () => vaiAlProblemaVicino(false));
+  $("btn-problema-dopo").addEventListener("click", () => vaiAlProblemaVicino(true));
+  $("btn-va-bene").addEventListener("click", vaBeneCosi);
+  $("btn-copri-tratto").addEventListener("click", () => apriZonaFissa(-1));
+  // maniglie del pezzo da salvare
+  for (const id of ["maniglia-inizio", "maniglia-fine"]) {
+    $(id).addEventListener("pointerdown", iniziaManiglia);
+    $(id).addEventListener("pointermove", muoviManiglia);
+    $(id).addEventListener("pointerup", fineManiglia);
+    $(id).addEventListener("pointercancel", fineManiglia);
+  }
   // zone a mano
   $("btn-fissa-nuova").addEventListener("click", () => apriZonaFissa(-1));
   $("scelta-segui").addEventListener("click", (evento) => {
@@ -3123,12 +3742,26 @@ async function avvio() {
   for (const b of document.querySelectorAll("#tempi-fissa .passo")) {
     b.addEventListener("click", () => cambiaTempoFissa(b.dataset.quale, Number(b.dataset.passo)));
   }
-  $("scelta-vista").addEventListener("click", (evento) => {
-    const b = evento.target.closest("button");
-    if (b) {
-      cambiaVista(b.dataset.valore);
+  // Prima / Dopo: la linea si trascina; con le frecce si sposta; doppio clic = torna sul display
+  $("linea-confronto").addEventListener("pointerdown", iniziaLinea);
+  $("linea-confronto").addEventListener("pointermove", muoviLinea);
+  $("linea-confronto").addEventListener("pointerup", fineLinea);
+  $("linea-confronto").addEventListener("pointercancel", fineLinea);
+  $("linea-confronto").addEventListener("dblclick", (evento) => {
+    evento.stopPropagation(); // non apre "Regola la zona"
+    lineaSpostata = false;
+    centraLineaSullaZona(ultimaAnteprima ? ultimaAnteprima.zona : null);
+  });
+  $("linea-confronto").querySelector(".maniglia-confronto").addEventListener("keydown", (evento) => {
+    if (evento.key === "ArrowLeft" || evento.key === "ArrowRight") {
+      evento.preventDefault();
+      evento.stopPropagation();
+      divisione += evento.key === "ArrowRight" ? 0.05 : -0.05;
+      lineaSpostata = true;
+      applicaDivisione();
     }
   });
+  applicaDivisione();
   $("btn-torna").addEventListener("click", tornaAiVideo);
   $("scelta-vale").addEventListener("click", (evento) => {
     const b = evento.target.closest("button");
@@ -3157,6 +3790,11 @@ async function avvio() {
   osservatore.observe($("anteprima-img"));
 
   mostraSchermata("inizio");
+  aggiornaBarraPixel(0);
+  // la prima volta: "Come funziona"
+  if (!scelte.guidaVista) {
+    setTimeout(mostraGuida, 400);
+  }
 
   if (scelte.controllaAggiornamenti) {
     controllaAggiornamenti(false);

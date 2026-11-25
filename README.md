@@ -78,6 +78,22 @@ Sul Mac ci sono anche nel menu in alto (Aiuto › Scorciatoie da tastiera).
 - Se il lavoro dura da più di un minuto, «Interrompi» chiede conferma. Anche
   chiudere la finestra mentre lavora chiede conferma.
 
+## Grafica
+
+- **Prima / Dopo**: nell'anteprima trascini la linea bianca: a sinistra
+  l'originale, a destra il risultato. Va da sola sul display; doppio clic per
+  rimetterla lì, **R** per vedere tutto l'originale o tutto il risultato.
+- **Linea del tempo**: i fotogrammi del video, con le maniglie ambra per
+  scegliere il pezzo da salvare (trascinale) e la striscia colorata sotto.
+- **Tratti da controllare**: la barra sotto la striscia ti porta a ogni tratto
+  arancione o rosso (‹ ›). «Va bene così» o «Copri a mano» e il tratto diventa
+  verde; poi passa da sola al prossimo. Nel pannello, «Annulla» rimette i
+  tratti «Va bene così» come prima.
+- Miniature nella lista, **Fatti di recente** nella schermata iniziale,
+  **Come funziona** al primo avvio (e da Aiuto o Impostazioni › Aspetto).
+- **Impostazioni › Aspetto**: tema chiaro, scuro o automatico, miniature, recenti e lingua.
+- Icona nuova: un tachimetro con il numero fatto di quadratini.
+
 ## Zone a mano, targhe e volti
 
 - **Zone a mano** ("Copri qui…" o "Copri a mano un tratto rosso"): dove il display

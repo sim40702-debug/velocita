@@ -413,6 +413,57 @@ pub fn leggi_fotogramma(ffmpeg: &Path, percorso: &Path, info: &InfoVideo, second
     Ok(foto)
 }
 
+/// MINIATURE: `quante` fotogrammi piccoli (alti `altezza` pixel) presi a
+/// distanze uguali nel video, per la linea del tempo e per la lista.
+/// Per una foto: una sola miniatura.
+pub fn miniature(ffmpeg: &Path, percorso: &Path, quante: usize, altezza: usize) -> Result<Vec<Fotogramma>, String> {
+    if e_immagine(percorso) {
+        let foto = apri_immagine(percorso)?;
+        return Ok(vec![rimpicciolisci(&foto, altezza)]);
+    }
+    let info = leggi_info(ffmpeg, percorso)?;
+    // larghezza in proporzione (pari, come vuole ffmpeg)
+    let larghezza = ((altezza as f64 * info.larghezza as f64 / info.altezza.max(1) as f64 / 2.0).round() as usize * 2).max(2);
+    let quante = quante.clamp(1, 40);
+    // ogni miniatura è un ffmpeg a parte: si fanno tutte insieme (in parallelo)
+    let risultati: Vec<Result<Fotogramma, String>> = (0..quante)
+        .into_par_iter()
+        .map(|i| {
+            let secondi = info.durata * (i as f64 + 0.5) / quante as f64;
+            let filtro = format!("scale={larghezza}:{altezza}");
+            let uscita = comando_ffmpeg(ffmpeg)
+                .args(["-hide_banner", "-loglevel", "error", "-ss", &format!("{secondi:.3}"), "-i"])
+                .arg(percorso)
+                .args(["-frames:v", "1", "-vf", &filtro, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+                .stdin(Stdio::null())
+                .output()
+                .map_err(|e| format!("Non riesco ad avviare ffmpeg: {e}"))?;
+            let dimensione = larghezza * altezza * 3;
+            if uscita.stdout.len() < dimensione {
+                return Err("Non riesco a leggere questo punto del video.".to_string());
+            }
+            Ok(Fotogramma { larghezza, altezza, dati: uscita.stdout[..dimensione].to_vec() })
+        })
+        .collect();
+    risultati.into_iter().collect()
+}
+
+/// Una copia più piccola (alta `altezza` pixel) di un fotogramma.
+fn rimpicciolisci(foto: &Fotogramma, altezza: usize) -> Fotogramma {
+    let larghezza = (altezza * foto.larghezza / foto.altezza.max(1)).max(1);
+    let mut dati = vec![0u8; larghezza * altezza * 3];
+    for y in 0..altezza {
+        for x in 0..larghezza {
+            let sx = x * foto.larghezza / larghezza;
+            let sy = y * foto.altezza / altezza;
+            for c in 0..3 {
+                dati[(y * larghezza + x) * 3 + c] = foto.dati[(sy * foto.larghezza + sx) * 3 + c];
+            }
+        }
+    }
+    Fotogramma { larghezza, altezza, dati }
+}
+
 /// Anteprima di un video o di una foto: trova il display senza coprirlo.
 pub fn anteprima(
     ffmpeg: &Path,

@@ -5,51 +5,79 @@
    ========================================== */
 
 :root {
-  --sfondo: #f7f6f4;
+  /* chiaro: grigi freddi come l'asfalto, ambra come la luce del display */
+  --sfondo: #eef0f2;
   --pannello: #ffffff;
-  --bordo: #e7e4e0;
-  --controllo: #f0eeeb;
-  --controllo-sopra: #e7e4e0;
-  --testo: #1d1c1a;
-  --testo-2: #6e6a65;
-  --testo-3: #736e68;     /* 4.6:1 sullo sfondo: si legge anche piccolo */
+  --barra: #f7f8f9;
+  --bordo: #dce0e4;
+  --controllo: #e6e9ec;
+  --controllo-sopra: #dce0e4;
+  --testo: #1e2125;
+  --testo-2: #5b626a;
+  --testo-3: #6b727a;     /* 4.6:1 sullo sfondo: si legge anche piccolo */
   --accento: #b04e09;     /* link e bordi: 5.3:1 sul bianco */
   --accento-sopra: #9a4508;
   --accento-bottone: #b04e09;       /* sfondo del bottone arancione (testo bianco) */
   --accento-bottone-sopra: #9a4508;
-  --accento-tenue: #fbede2;
+  --accento-tenue: #f6e6d8;
   --verde: #2e8b57;
   --ambra: #c7860c;
   --rosso: #c9372c;
   --blu: #2f6fd6;      /* coperto con una zona a mano */
-  --nero: #121212;
-  --tratteggio: #d6d2cc;
+  --nero: #15171a;
+  --tratteggio: #c9ced4;
   --raggio: 6px;
   --carattere: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Inter, sans-serif;
 }
 
+/* scuro: se il Mac è scuro (tema "Automatico")... */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --blu: #6b9cf2;
-    --sfondo: #1c1b1a;
-    --pannello: #242322;
-    --bordo: #353330;
-    --controllo: #2f2d2b;
-    --controllo-sopra: #3a3835;
-    --testo: #f2f0ed;
-    --testo-2: #aaa59f;
-    --testo-3: #8f8a84;
-    --accento: #f07a22;
-    --accento-sopra: #f58b3a;
+  :root:not([data-tema="chiaro"]) {
+    --sfondo: #15171a;
+    --pannello: #1e2125;
+    --barra: #1a1d20;
+    --bordo: #30353b;
+    --controllo: #2a2e33;
+    --controllo-sopra: #353a40;
+    --testo: #eceef0;
+    --testo-2: #a4abb3;
+    --testo-3: #8b929a;
+    --accento: #f28c28;
+    --accento-sopra: #f59a3c;
     --accento-bottone: #b5540b;
     --accento-bottone-sopra: #a04a09;
-    --accento-tenue: rgba(240, 122, 34, 0.16);
-    --verde: #3aa66a;
-    --ambra: #d99a1e;
-    --rosso: #e0544a;
-    --nero: #0d0d0d;
-    --tratteggio: #4a4743;
+    --accento-tenue: rgba(242, 140, 40, 0.16);
+    --verde: #46a874;
+    --ambra: #d9a033;
+    --rosso: #e0574b;
+    --blu: #6b9cf2;
+    --nero: #0e1012;
+    --tratteggio: #4a5057;
   }
+}
+
+/* ...oppure se nelle impostazioni hai scelto "Scuro" */
+:root[data-tema="scuro"] {
+  --sfondo: #15171a;
+  --pannello: #1e2125;
+  --barra: #1a1d20;
+  --bordo: #30353b;
+  --controllo: #2a2e33;
+  --controllo-sopra: #353a40;
+  --testo: #eceef0;
+  --testo-2: #a4abb3;
+  --testo-3: #8b929a;
+  --accento: #f28c28;
+  --accento-sopra: #f59a3c;
+  --accento-bottone: #b5540b;
+  --accento-bottone-sopra: #a04a09;
+  --accento-tenue: rgba(242, 140, 40, 0.16);
+  --verde: #46a874;
+  --ambra: #d9a033;
+  --rosso: #e0574b;
+  --blu: #6b9cf2;
+  --nero: #0e1012;
+  --tratteggio: #4a5057;
 }
 
 /* ---------- BASE ---------- */
@@ -114,7 +142,7 @@ button {
   align-items: center;
   height: 52px;
   padding: 0 12px 0 20px;
-  background: var(--pannello);
+  background: var(--barra);
   border-bottom: 1px solid var(--bordo);
 }
 
@@ -366,7 +394,7 @@ button {
 }
 
 /* mentre regoli, cursore, striscia e pannello sono fermi */
-.regolazione-aperta #cursore-anteprima,
+.regolazione-aperta .linea-tempo,
 .regolazione-aperta .striscia,
 .regolazione-aperta .sotto-cursore,
 .regolazione-aperta .pannello {
@@ -1438,13 +1466,6 @@ button.riga-file.attivo:hover {
 
 /* ---------- ANTEPRIMA: Originale / Risultato e schermo intero ---------- */
 
-.vista-anteprima {
-  position: absolute;
-  top: 12px;
-  left: 12px;
-  background: rgba(0, 0, 0, 0.55);
-}
-
 .bottone-anteprima.solo-icona {
   width: 28px;
   padding: 0;
@@ -1457,15 +1478,6 @@ button.riga-file.attivo:hover {
 
 #btn-animazione {
   right: 48px;
-}
-
-/* con "Risultato" la zona tratteggiata non serve: si vede già coperto */
-.vista-risultato .zona-rossa {
-  display: none;
-}
-
-.regolazione-aperta .vista-anteprima {
-  display: none;
 }
 
 /* l'anteprima riempie tutta la finestra */
@@ -1625,7 +1637,6 @@ button.riga-file.attivo:hover {
   background: rgba(47, 111, 214, 0.1);
 }
 
-.vista-risultato #anteprima-altre,
 .regolazione-aperta #anteprima-altre,
 .animazione-attiva #anteprima-altre {
   display: none;
@@ -1644,4 +1655,736 @@ button.riga-file.attivo:hover {
   margin-left: 6px;
   color: var(--testo-3);
   font-size: 12px;
+}
+
+/* ---------- MARCHIO NELLA BARRA ---------- */
+
+.barra-titolo .marchio {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+
+/* ---------- PRIMA / DOPO ---------- */
+
+/* il risultato sta sopra l'originale: si vede solo a destra della linea */
+.risultato-img {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.linea-confronto {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  z-index: 2;
+  width: 24px;
+  margin-left: -12px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+/* la linea bianca sottile */
+.linea-confronto::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 11px;
+  width: 2px;
+  background: #fff;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+}
+
+/* il cerchio con le frecce ‹ › */
+.maniglia-confronto {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.maniglia-confronto svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #1e2125;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* "Originale" a sinistra della linea, "Risultato" a destra */
+.etichetta-confronto {
+  position: absolute;
+  top: 12px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.etichetta-confronto.prima {
+  right: 20px;
+}
+
+.etichetta-confronto.dopo {
+  left: 20px;
+}
+
+.senza-prima .etichetta-confronto.prima,
+.senza-dopo .etichetta-confronto.dopo {
+  display: none;
+}
+
+/* mentre regoli la zona o guardi i 3 secondi: solo l'originale */
+.regolazione-aperta .risultato-img,
+.regolazione-aperta .linea-confronto,
+.animazione-attiva .risultato-img,
+.animazione-attiva .linea-confronto {
+  display: none;
+}
+
+/* ---------- LINEA DEL TEMPO ---------- */
+
+.linea-tempo {
+  position: relative;
+  flex: none;
+  height: 48px;
+  margin-top: 6px;
+  border-radius: 8px;
+}
+
+/* i fotogrammi piccoli, uno accanto all'altro */
+.fotogrammi {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--nero);
+}
+
+.fotogrammi img,
+.fotogramma-vuoto {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fotogramma-vuoto {
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* la parte che non viene salvata: più scura */
+.fuori {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+#fuori-prima {
+  left: 0;
+  border-radius: 8px 0 0 8px;
+}
+
+#fuori-dopo {
+  right: 0;
+  border-radius: 0 8px 8px 0;
+}
+
+/* la cornice ambra del pezzo da salvare, con le maniglie [ ] */
+.cornice-taglio {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  z-index: 3;
+  border: 2.5px solid var(--accento);
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+/* senza taglio la cornice è più leggera */
+.linea-tempo:not(.con-taglio) .cornice-taglio {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.maniglia-taglio {
+  position: absolute;
+  top: -2.5px;
+  bottom: -2.5px;
+  width: 12px;
+  background: var(--accento);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.maniglia-taglio.inizio {
+  left: -2.5px;
+  border-radius: 7px 0 0 7px;
+}
+
+.maniglia-taglio.fine {
+  right: -2.5px;
+  border-radius: 0 7px 7px 0;
+}
+
+/* il trattino bianco al centro di ogni maniglia */
+.maniglia-taglio::after {
+  content: "";
+  position: absolute;
+  top: 35%;
+  bottom: 35%;
+  left: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: #fff;
+}
+
+.linea-tempo:not(.con-taglio) .maniglia-taglio {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* il cursore vero non si vede: si usa la linea del punto attuale */
+.cursore-tempo {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  height: 100%;
+  opacity: 0;
+}
+
+.linea-tempo:focus-within {
+  outline: 2px solid var(--accento);
+  outline-offset: 3px;
+}
+
+/* il punto attuale: una linea con un triangolino sopra */
+.testina {
+  position: absolute;
+  top: -8px;
+  bottom: -14px;
+  z-index: 4;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--testo);
+  box-shadow: 0 0 0 1px var(--pannello);
+  pointer-events: none;
+}
+
+.testina::before {
+  content: "";
+  position: absolute;
+  top: -6px;
+  left: -5px;
+  border: 6px solid transparent;
+  border-top: 7px solid var(--testo);
+}
+
+.striscia {
+  margin-top: 4px;
+}
+
+/* ---------- TRATTI DA CONTROLLARE ---------- */
+
+.barra-problemi {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 4px 6px 4px 12px;
+  border: 1px solid var(--bordo);
+  border-radius: 10px;
+  background: var(--pannello);
+}
+
+/* il segno a sinistra: quadratino a righe (da controllare) o a trattini (rosso) */
+.problemi-segno {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(135deg, var(--ambra) 0 3px, rgba(255, 255, 255, 0.55) 3px 4.5px);
+}
+
+.barra-problemi.rosso .problemi-segno {
+  background: repeating-linear-gradient(90deg, var(--rosso) 0 3px, transparent 3px 4.5px);
+}
+
+.problemi-testo {
+  font-weight: 600;
+}
+
+.problemi-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  color: var(--testo-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.problemi-numero {
+  min-width: 42px;
+  text-align: center;
+}
+
+.problemi-nav .icona {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.barra-problemi .spazio {
+  flex: 1;
+}
+
+.barra-problemi .bottone:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* quando è tutto a posto: verde, senza bottoni */
+.barra-problemi.tutto-verde .problemi-segno {
+  background: var(--verde);
+}
+
+.barra-problemi.tutto-verde .problemi-nav,
+.barra-problemi.tutto-verde .bottone {
+  display: none;
+}
+
+.barra-problemi.tutto-verde .problemi-testo {
+  font-weight: 500;
+  color: var(--testo-2);
+}
+
+.riga-fissa .confermati {
+  color: var(--testo-2);
+}
+
+/* ---------- SCHERMATA INIZIALE ---------- */
+
+#schermata-inizio:not(.nascosto) {
+  display: flex;
+  flex-direction: column;
+}
+
+#schermata-inizio .zona-trascina {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  background: var(--pannello);
+}
+
+.icona-app {
+  width: 112px;
+  height: 112px;
+  margin-bottom: 14px;
+}
+
+#schermata-inizio .zona-trascina h2 {
+  font-size: 22px;
+  letter-spacing: -0.3px;
+}
+
+.bottoni-inizio {
+  display: flex;
+  gap: 10px;
+}
+
+#schermata-inizio .zona-trascina .formati {
+  margin-top: 18px;
+  letter-spacing: 0;
+}
+
+/* gli ultimi video fatti */
+.recenti {
+  flex: none;
+  margin: -4px 20px 20px;
+}
+
+.recenti-titolo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.lista-recenti {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.scheda-recente {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--testo);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scheda-recente img,
+.scheda-recente .senza-figura {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin-bottom: 6px;
+  border-radius: 9px;
+  object-fit: cover;
+  background: var(--nero);
+}
+
+.scheda-recente .senza-figura {
+  display: grid;
+  place-items: center;
+  color: var(--testo-3);
+}
+
+.scheda-recente:hover img {
+  filter: brightness(1.08);
+}
+
+.scheda-recente .coperto {
+  position: absolute;
+  top: 7px;
+  left: 7px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.scheda-recente .coperto i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #46a874;
+}
+
+.scheda-recente .titolo {
+  overflow: hidden;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.scheda-recente .meta {
+  color: var(--testo-3);
+  font-size: 12px;
+}
+
+/* ---------- MINIATURE NELLE RIGHE ---------- */
+
+.miniatura-riga {
+  flex: none;
+  width: 26px;
+  height: 40px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--nero);
+}
+
+/* ---------- ESPORTAZIONE: BARRA DI QUADRATINI ---------- */
+
+.barra-pixel {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 3px;
+  height: 10px;
+}
+
+.barra-pixel i {
+  border-radius: 2.5px;
+  background: var(--controllo-sopra);
+  transition: background 0.25s;
+}
+
+.barra-pixel i.pieno {
+  background: var(--accento);
+}
+
+.barra-pixel i.mezzo {
+  background: var(--accento);
+  opacity: 0.45;
+}
+
+#corso-percentuale {
+  font-size: 28px;
+  letter-spacing: -0.5px;
+}
+
+/* ---------- FATTO: SPUNTA DI QUADRATINI E PRIMA / DOPO ---------- */
+
+.esito-icona.pixel {
+  width: 44px;
+  border-radius: 0;
+  background: none;
+}
+
+.spunta-pixel {
+  position: relative;
+  display: block;
+  width: 44px;
+  height: 32px;
+}
+
+/* 7 quadratini a forma di spunta: compaiono uno dopo l'altro */
+.spunta-pixel i {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: var(--verde);
+  animation: compare-quadratino 0.25s both;
+}
+
+.spunta-pixel i:nth-child(1) { left: 0; top: 13px; animation-delay: 0s; }
+.spunta-pixel i:nth-child(2) { left: 7px; top: 20px; animation-delay: 0.06s; }
+.spunta-pixel i:nth-child(3) { left: 14px; top: 27px; animation-delay: 0.12s; }
+.spunta-pixel i:nth-child(4) { left: 21px; top: 20px; animation-delay: 0.18s; }
+.spunta-pixel i:nth-child(5) { left: 28px; top: 13px; animation-delay: 0.24s; }
+.spunta-pixel i:nth-child(6) { left: 35px; top: 6px; animation-delay: 0.3s; }
+.spunta-pixel i:nth-child(7) { left: 42px; top: -1px; animation-delay: 0.36s; }
+
+@keyframes compare-quadratino {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+#finito-anteprima img {
+  position: absolute;
+  inset: 0;
+}
+
+#finito-anteprima .risultato-img {
+  pointer-events: none;
+}
+
+/* ---------- IMPOSTAZIONI: ASPETTO ---------- */
+
+.scelta-tema {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.scelta-tema button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--testo);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.scelta-tema button.attivo {
+  font-weight: 600;
+}
+
+/* la mini finestra disegnata: video a sinistra, pannello a destra */
+.mini-finestra {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  width: 140px;
+  height: 88px;
+  padding: 10px;
+  overflow: hidden;
+  border: 1px solid var(--bordo);
+  border-radius: 10px;
+  background: #eef0f2;
+}
+
+.scelta-tema button.attivo .mini-finestra {
+  border: 2px solid var(--accento);
+  padding: 9px;
+}
+
+.mini-finestra i {
+  flex: 2;
+  border-radius: 4px;
+  background: #2b2f35;
+}
+
+.mini-finestra b {
+  position: relative;
+  flex: 1;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.mini-finestra b::after {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 6px;
+  left: 5px;
+  height: 8px;
+  border-radius: 3px;
+  background: #b04e09;
+}
+
+.tema-scuro .mini-finestra {
+  background: #15171a;
+}
+
+.tema-scuro .mini-finestra b {
+  background: #1e2125;
+}
+
+/* automatico: metà chiaro e metà scuro */
+.tema-auto .mini-finestra {
+  background: linear-gradient(90deg, #eef0f2 50%, #15171a 50%);
+}
+
+.tema-auto .mini-finestra b {
+  background: #1e2125;
+}
+
+/* ---------- COME FUNZIONA ---------- */
+
+.guida {
+  width: 560px;
+  max-width: calc(100% - 40px);
+  padding: 26px 28px 22px;
+  border-radius: 14px;
+  background: var(--pannello);
+  box-shadow: 0 0 0 0.5px var(--bordo), 0 20px 50px rgba(0, 0, 0, 0.3);
+}
+
+.guida-alto {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+}
+
+.guida-sopra {
+  color: var(--accento);
+  font-weight: 600;
+}
+
+.guida-numero {
+  color: var(--testo-3);
+}
+
+.guida h3 {
+  margin: 10px 0 6px;
+  font-size: 21px;
+  letter-spacing: -0.3px;
+}
+
+.guida p {
+  margin: 0;
+  color: var(--testo-2);
+  line-height: 1.5;
+}
+
+.guida-figura {
+  display: grid;
+  place-items: center;
+  height: 120px;
+  margin: 18px 0;
+  border-radius: 10px;
+  background: var(--sfondo);
+}
+
+.guida-icona {
+  width: 84px;
+  height: 84px;
+}
+
+.guida-striscia {
+  display: flex;
+  width: 80%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 5px;
+}
+
+.guida-striscia .v { background: var(--verde); }
+.guida-striscia .r { background: repeating-linear-gradient(90deg, var(--rosso) 0 3px, transparent 3px 4.5px); }
+.guida-striscia .g { background: repeating-linear-gradient(135deg, var(--ambra) 0 3px, rgba(255, 255, 255, 0.55) 3px 4.5px); }
+
+.guida-file {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.guida-file b {
+  padding: 6px 12px;
+  border-radius: 7px;
+  background: var(--pannello);
+  font-weight: 500;
+  box-shadow: 0 0 0 1px var(--bordo);
+}
+
+.guida-file b.nuovo {
+  box-shadow: 0 0 0 2px var(--verde);
+}
+
+.guida-basso {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guida-puntini {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+}
+
+.guida-puntini i {
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--controllo-sopra);
+}
+
+.guida-puntini i.attivo {
+  width: 18px;
+  background: var(--accento);
 }

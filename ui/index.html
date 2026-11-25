@@ -30,6 +30,21 @@
   <!-- BARRA IN ALTO (si può trascinare per spostare la finestra) -->
   <header class="barra" data-tauri-drag-region>
     <div class="barra-titolo" data-tauri-drag-region>
+      <!-- il marchio: il tachimetro con il numero fatto di quadratini -->
+      <svg class="marchio" viewBox="0 0 22 22" aria-hidden="true" data-tauri-drag-region>
+        <defs>
+          <linearGradient id="marchio-fondo" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#30353b"/><stop offset="1" stop-color="#16181b"/></linearGradient>
+          <linearGradient id="marchio-arco" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb45c"/><stop offset="1" stop-color="#e86a10"/></linearGradient>
+        </defs>
+        <rect width="22" height="22" rx="5.2" fill="url(#marchio-fondo)"/>
+        <path d="M4.9,16.3 A7,7 0 1 1 16.4,8.3" fill="none" stroke="url(#marchio-arco)" stroke-width="2" stroke-linecap="round"/>
+        <rect x="7.4" y="11.5" width="2.3" height="2.3" rx="0.5" fill="#ffb45c"/>
+        <rect x="9.9" y="11.5" width="2.3" height="2.3" rx="0.5" fill="#e86a10"/>
+        <rect x="12.4" y="11.5" width="2.3" height="2.3" rx="0.5" fill="#f28c28"/>
+        <rect x="7.4" y="14" width="2.3" height="2.3" rx="0.5" fill="#e86a10"/>
+        <rect x="9.9" y="14" width="2.3" height="2.3" rx="0.5" fill="#f59a3c"/>
+        <rect x="12.4" y="14" width="2.3" height="2.3" rx="0.5" fill="#d2600c"/>
+      </svg>
       <strong data-tauri-drag-region>Velocità</strong>
       <span id="barra-sottotitolo" data-tauri-drag-region></span>
     </div>
@@ -54,12 +69,23 @@
     <!-- 1. INIZIO -->
     <section id="schermata-inizio" class="schermata">
       <div id="zona-trascina" class="zona-trascina">
-        <svg class="icona icona-grande"><use href="#i-video"/></svg>
+        <img class="icona-app" src="icona.png" alt="">
         <h2>Trascina qui i video della moto</h2>
-        <p>Uno o più video, oppure delle foto. Il numero della velocità viene coperto in automatico.</p>
-        <button id="btn-scegli" class="bottone primario">Scegli file…</button>
-        <p class="suggerimento">oppure ⌘O · <button id="btn-scegli-cartella" class="link">scegli una cartella</button></p>
-        <p class="formati">MP4 · MOV · MKV · AVI · JPG · PNG · WEBP</p>
+        <p>Il numero della velocità viene coperto da solo. Anche facce e targhe, se vuoi.</p>
+        <div class="bottoni-inizio">
+          <button id="btn-scegli" class="bottone primario">Scegli i video…</button>
+          <button id="btn-scegli-cartella" class="bottone secondario">Scegli una cartella</button>
+        </div>
+        <p class="formati">MP4, MOV, MKV, AVI e foto JPG, PNG, WEBP · tutto resta sul tuo computer</p>
+      </div>
+
+      <!-- gli ultimi video fatti: un clic e si aprono -->
+      <div id="recenti" class="recenti nascosto">
+        <div class="recenti-titolo">
+          <span>Fatti di recente</span>
+          <button id="btn-svuota-recenti" class="link">Svuota</button>
+        </div>
+        <div id="lista-recenti" class="lista-recenti"></div>
       </div>
     </section>
 
@@ -82,6 +108,16 @@
             </div>
             <!-- le altre zone coperte: facce e oggetti seguiti -->
             <div id="anteprima-altre"></div>
+            <!-- PRIMA / DOPO: il risultato sta sopra e si vede solo a destra della linea -->
+            <img id="risultato-img" class="risultato-img" alt="">
+          </div>
+          <!-- la linea da trascinare per confrontare originale e risultato -->
+          <div id="linea-confronto" class="linea-confronto" title="Trascina per confrontare (tasto R: tutto originale o tutto risultato)">
+            <span class="etichetta-confronto prima">Originale</span>
+            <span class="etichetta-confronto dopo">Risultato</span>
+            <span class="maniglia-confronto" role="slider" tabindex="0" aria-label="Confronto originale e risultato">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 6l-4 4 4 4M12 6l4 4-4 4"/></svg>
+            </span>
           </div>
           <!-- mini anteprima animata: 3 secondi del risultato -->
           <img id="animazione-img" class="animazione nascosto" alt="">
@@ -91,11 +127,6 @@
           <button id="btn-schermo" class="bottone-anteprima solo-icona" title="Schermo intero (F)" aria-label="Schermo intero">
             <svg class="icona contorno"><use href="#i-schermo"/></svg>
           </button>
-          <!-- il video com'è adesso o come sarà coperto -->
-          <div id="scelta-vista" class="segmentato scuro vista-anteprima" title="Tasto R">
-            <button data-valore="originale" class="attivo">Originale</button>
-            <button data-valore="risultato">Risultato</button>
-          </div>
           <div id="anteprima-carico" class="anteprima-messaggio">Carico l'anteprima…</div>
           <div id="anteprima-info" class="info-anteprima nascosto"><i id="info-pallino"></i><span id="info-testo"></span></div>
 
@@ -125,13 +156,22 @@
             <button id="btn-regola-fatto" class="bottone primario piccolo">Applica</button>
           </div>
         </div>
-        <input id="cursore-anteprima" type="range" min="0" max="1000" value="300" aria-label="Punto del video">
+        <!-- LINEA DEL TEMPO: i fotogrammi, il pezzo da salvare (maniglie) e il punto attuale -->
+        <div id="linea-tempo" class="linea-tempo">
+          <div id="fotogrammi" class="fotogrammi"></div>
+          <div id="fuori-prima" class="fuori"></div>
+          <div id="fuori-dopo" class="fuori"></div>
+          <div id="cornice-taglio" class="cornice-taglio">
+            <span id="maniglia-inizio" class="maniglia-taglio inizio" title="Trascina: dove inizia il video salvato"></span>
+            <span id="maniglia-fine" class="maniglia-taglio fine" title="Trascina: dove finisce il video salvato"></span>
+          </div>
+          <input id="cursore-anteprima" class="cursore-tempo" type="range" min="0" max="1000" value="300" aria-label="Punto del video">
+          <span id="testina" class="testina"></span>
+        </div>
 
         <!-- striscia colorata: dove il display viene trovato nel video -->
         <div id="striscia" class="striscia" tabindex="0" role="group" aria-label="Copertura del video: con le frecce salti ai punti da controllare" title="Clicca per andare in quel punto · frecce: salta ai punti da controllare">
           <canvas id="striscia-tela"></canvas>
-          <span id="segno-inizio" class="segno-taglio inizio nascosto"></span>
-          <span id="segno-fine" class="segno-taglio fine nascosto"></span>
         </div>
 
         <!-- tempo del cursore e pezzo del video da salvare -->
@@ -141,6 +181,23 @@
             <button id="btn-inizio" class="bottone secondario piccolo" title="Il video salvato inizia qui (tasto I)">[ Inizio qui</button>
             <button id="btn-fine-taglio" class="bottone secondario piccolo" title="Il video salvato finisce qui (tasto O)">Fine qui ]</button>
           </span>
+        </div>
+        <!-- TRATTI DA CONTROLLARE: ti porta lì, e con «Va bene così» o «Copri a mano» diventano verdi -->
+        <div id="barra-problemi" class="barra-problemi nascosto">
+          <span id="problemi-segno" class="problemi-segno"></span>
+          <span id="problemi-testo" class="problemi-testo"></span>
+          <span id="problemi-nav" class="problemi-nav">
+            <button id="btn-problema-prima" class="bottone-icona piccolo" title="Tratto prima" aria-label="Tratto prima">
+              <svg class="icona" viewBox="0 0 20 20"><path d="M12 5l-5 5 5 5"/></svg>
+            </button>
+            <span id="problemi-numero" class="problemi-numero"></span>
+            <button id="btn-problema-dopo" class="bottone-icona piccolo" title="Tratto dopo" aria-label="Tratto dopo">
+              <svg class="icona" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></svg>
+            </button>
+          </span>
+          <span class="spazio"></span>
+          <button id="btn-va-bene" class="bottone secondario piccolo" title="Qui non c'è niente da coprire: il tratto diventa verde">Va bene così</button>
+          <button id="btn-copri-tratto" class="bottone primario piccolo" title="Disegna tu la zona da coprire in questo tratto">Copri a mano</button>
         </div>
         <div id="legenda" class="legenda"></div>
         <p id="testo-anteprima" class="nota">La zona tratteggiata è quella che verrà coperta. Doppio clic sulla zona per regolarla.</p>
@@ -250,7 +307,8 @@
           <img id="corso-img" alt="">
           <div id="corso-zona" class="zona-rossa nascosto"></div>
         </div>
-        <div class="barra-avanzamento"><div id="barra-piena"></div></div>
+        <!-- la barra fatta di quadratini che si riempiono (come i pixel) -->
+        <div id="barra-pixel" class="barra-pixel" aria-hidden="true"></div>
         <div class="avanzamento-testo">
           <strong id="corso-percentuale">0%</strong>
           <span id="corso-sottotitolo">Sto lavorando…</span>
@@ -279,8 +337,15 @@
     <!-- 4. FINITO -->
     <section id="schermata-finito" class="schermata due-colonne nascosto">
       <div class="area">
-        <div class="anteprima">
-          <img id="finito-img" alt="">
+        <div id="finito-anteprima" class="anteprima">
+          <!-- prima / dopo del video appena finito -->
+          <img id="finito-prima" alt="">
+          <img id="finito-img" class="risultato-img" alt="">
+          <div id="finito-linea" class="linea-confronto nascosto" title="Trascina per confrontare">
+            <span class="etichetta-confronto prima">Originale</span>
+            <span class="etichetta-confronto dopo">Risultato</span>
+            <span class="maniglia-confronto"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 6l-4 4 4 4M12 6l4 4-4 4"/></svg></span>
+          </div>
           <div id="finito-vuoto" class="anteprima-messaggio nascosto"></div>
         </div>
       </div>
@@ -313,6 +378,7 @@
     <section id="schermata-impostazioni" class="schermata impostazioni nascosto">
       <nav id="menu-impostazioni" class="menu-impostazioni">
         <button data-sezione="generale" class="attivo">Generale</button>
+        <button data-sezione="aspetto">Aspetto</button>
         <button data-sezione="display">Display</button>
         <button data-sezione="prestazioni">Prestazioni</button>
         <button data-sezione="aggiornamenti">Aggiornamenti</button>
@@ -335,17 +401,6 @@
               <span></span>
             </label>
           </div>
-          <!-- lingua dell'app -->
-          <div class="riga">
-            <span>Lingua</span>
-            <div id="scelta-lingua" class="segmentato">
-              <button data-valore="auto" class="attivo">Auto</button>
-              <button data-valore="it">Italiano</button>
-              <button data-valore="en">English</button>
-              <button data-valore="de">Deutsch</button>
-            </div>
-          </div>
-          <p id="nota-lingua" class="nota nascosto">La lingua cambia al prossimo avvio di Velocità.</p>
           <!-- cartella sorvegliata: i video nuovi si coprono da soli -->
           <div class="riga">
             <div class="riga-testi">
@@ -359,6 +414,52 @@
             <button id="btn-scegli-sorvegliata" class="link">Scegli…</button>
           </div>
           <p class="nota">Forza e margine della copertura si regolano a destra dell'anteprima, mentre guardi il video.</p>
+        </div>
+
+        <!-- Aspetto -->
+        <div id="sezione-aspetto" class="sezione-impostazioni nascosto">
+          <h1>Aspetto</h1>
+          <p class="sottotitolo">Come appare Velocità.</p>
+          <div class="riga colonna">
+            <span>Tema</span>
+            <div id="scelta-tema" class="scelta-tema">
+              <button data-valore="chiaro" class="tema-chiaro"><span class="mini-finestra"><i></i><b></b></span>Chiaro</button>
+              <button data-valore="scuro" class="tema-scuro"><span class="mini-finestra"><i></i><b></b></span>Scuro</button>
+              <button data-valore="auto" class="tema-auto attivo"><span class="mini-finestra"><i></i><b></b></span>Automatico</button>
+            </div>
+          </div>
+          <div class="riga">
+            <div class="riga-testi">
+              <span>Miniature nella lista dei video</span>
+              <span class="aiuto">Mostra un fotogramma accanto a ogni video invece dell'icona.</span>
+            </div>
+            <label class="interruttore">
+              <input id="interruttore-miniature" type="checkbox" checked>
+              <span></span>
+            </label>
+          </div>
+          <div class="riga">
+            <div class="riga-testi">
+              <span>Mostra «Fatti di recente»</span>
+              <span class="aiuto">Gli ultimi video coperti nella schermata iniziale.</span>
+            </div>
+            <label class="interruttore">
+              <input id="interruttore-recenti" type="checkbox" checked>
+              <span></span>
+            </label>
+          </div>
+          <!-- lingua dell'app -->
+          <div class="riga">
+            <span>Lingua</span>
+            <div id="scelta-lingua" class="segmentato">
+              <button data-valore="auto" class="attivo">Auto</button>
+              <button data-valore="it">Italiano</button>
+              <button data-valore="en">English</button>
+              <button data-valore="de">Deutsch</button>
+            </div>
+          </div>
+          <p id="nota-lingua" class="nota nascosto">La lingua cambia al prossimo avvio di Velocità.</p>
+          <p class="nota"><button id="btn-come-funziona" class="link">Rivedi «Come funziona»</button></p>
         </div>
 
         <!-- Display -->
@@ -475,6 +576,24 @@
       </aside>
     </section>
   </main>
+
+  <!-- PRIMO AVVIO: 3 passi brevi che spiegano l'app -->
+  <div id="guida" class="dialogo-sfondo nascosto">
+    <div class="guida" role="dialog" aria-modal="true" aria-labelledby="guida-titolo">
+      <div class="guida-alto">
+        <span class="guida-sopra">Come funziona</span>
+        <span id="guida-numero" class="guida-numero"></span>
+      </div>
+      <h3 id="guida-titolo"></h3>
+      <p id="guida-testo"></p>
+      <div id="guida-figura" class="guida-figura"></div>
+      <div class="guida-basso">
+        <span id="guida-puntini" class="guida-puntini"></span>
+        <button id="guida-salta" class="bottone secondario">Salta</button>
+        <button id="guida-avanti" class="bottone primario">Avanti</button>
+      </div>
+    </div>
+  </div>
 
   <!-- DOMANDA: finestrella al centro (es. "Interrompere?") -->
   <div id="dialogo" class="dialogo-sfondo nascosto">

@@ -206,6 +206,21 @@ async fn anteprima_animata(
     .map_err(|e| e.to_string())?
 }
 
+/// Miniature per la linea del tempo e per la lista (immagini JPEG piccole).
+#[tauri::command]
+async fn miniature(percorso: String, quante: usize, altezza: usize) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let fotogrammi = video::miniature(&percorso_ffmpeg(), Path::new(&percorso), quante, altezza)?;
+        let mut immagini = Vec::new();
+        for foto in fotogrammi {
+            immagini.push(in_jpeg(foto, 10_000)?);
+        }
+        Ok(immagini)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Da file e cartelle a una lista di file: le cartelle diventano i video e le
 /// foto che contengono (in ordine di nome). I file già coperti (_speed_blur) si saltano.
 #[tauri::command]
@@ -403,22 +418,28 @@ extern "system" {
 }
 
 impl Sveglio {
-    #[allow(unused_mut)]
     fn nuovo() -> Sveglio {
-        let mut caffeinate = None;
-        #[cfg(target_os = "macos")]
-        {
-            // -i = niente stop, -w = si ferma da solo se Velocità si chiude
-            let pid = std::process::id().to_string();
-            caffeinate = std::process::Command::new("caffeinate").args(["-i", "-w", &pid]).spawn().ok();
-        }
         #[cfg(windows)]
         unsafe {
             // ES_CONTINUOUS | ES_SYSTEM_REQUIRED
             SetThreadExecutionState(0x8000_0000 | 0x0000_0001);
         }
-        Sveglio { caffeinate }
+        Sveglio { caffeinate: avvia_caffeinate() }
     }
+}
+
+/// Sul Mac: avvia "caffeinate".
+/// -i = niente stop, -w = si ferma da solo se Velocità si chiude
+#[cfg(target_os = "macos")]
+fn avvia_caffeinate() -> Option<std::process::Child> {
+    let pid = std::process::id().to_string();
+    std::process::Command::new("caffeinate").args(["-i", "-w", &pid]).spawn().ok()
+}
+
+/// Su Windows e Linux "caffeinate" non c'è.
+#[cfg(not(target_os = "macos"))]
+fn avvia_caffeinate() -> Option<std::process::Child> {
+    None
 }
 
 impl Drop for Sveglio {
@@ -594,7 +615,8 @@ fn main() {
             cpu_totali,
             analizza,
             espandi_percorsi,
-            da_fare_in_cartella
+            da_fare_in_cartella,
+            miniature
         ])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Velocità");
