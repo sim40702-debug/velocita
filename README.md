@@ -41,6 +41,14 @@ Con **Zona → Regola…** (o doppio clic sull'anteprima) sposti e ingrandisci a
 la zona coperta. La regolazione vale per tutto il video e segue il display
 anche quando si muove. **Ripristina** torna alla zona automatica.
 
+## Copertura, colori e parti del video
+
+- **Stile**: pixel, sfocato, nero o tinta unita (il colore medio della zona). Con **Guarda 3 s** vedi 3 secondi del risultato prima di esportare.
+- **Margine**: Piccolo, Normale, Grande o **Manuale** (da 0 a 50%).
+- **Parte del video**: sposta il cursore e premi **Da qui** / **Fino a qui** per salvare solo un pezzo (anche l'audio).
+- **Colori e 10 bit**: il video esce con le stesse informazioni sui colori dell'originale. I video a 10 bit (per esempio HLG o D-Log M) escono in HEVC a 10 bit, pronti per la correzione colore in DaVinci.
+- **Coda**: trascina i file per cambiare l'ordine; con **Cartella…** aggiungi tutti i video e le foto di una cartella (i file già coperti, `_speed_blur`, si saltano).
+
 ## Scorciatoie
 
 - **⌘O** (Ctrl+O su Windows): scegli i file

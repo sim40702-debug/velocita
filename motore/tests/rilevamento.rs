@@ -176,3 +176,88 @@ fn la_zona_regolata_resta_dentro_l_immagine() {
     let r = applica_regolazione(zona, reg, 1080, 1920);
     assert!(r.x >= 0 && r.y >= 0 && r.x + r.w <= 1080 && r.y + r.h <= 1920);
 }
+
+// ---------- colori e 10 bit ----------
+
+use motore::rilevamento::{copri_grezzo, Stile};
+use motore::video::{argomenti_codifica, leggi_formato_colori, InfoVideo};
+
+#[test]
+fn legge_i_colori_del_video() {
+    // video HLG a 10 bit (come l'Osmo Nano)
+    let (bit_10, colori) = leggi_formato_colori(
+        "hevc (Main 10) (hvc1 / 0x31637668), yuv420p10le(tv, bt2020nc/bt2020/arib-std-b67, progressive), 3840x2160, 60 fps",
+    );
+    let colori = colori.unwrap();
+    assert!(bit_10);
+    assert_eq!((colori.spazio.as_str(), colori.primari.as_str(), colori.trasferimento.as_str()), ("bt2020nc", "bt2020", "arib-std-b67"));
+    assert_eq!(colori.gamma, "tv");
+
+    // video HD normale
+    let (bit_10, colori) = leggi_formato_colori("h264 (High) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080");
+    assert!(!bit_10);
+    assert_eq!(colori.unwrap().spazio, "bt709");
+
+    // video senza informazioni sui colori
+    let (bit_10, colori) = leggi_formato_colori("h264 (High), yuv420p(progressive), 1280x720, 30 fps");
+    assert!(!bit_10);
+    assert!(colori.is_none());
+}
+
+fn info_prova(testo: &str) -> InfoVideo {
+    let (bit_10, colori) = leggi_formato_colori(testo);
+    InfoVideo {
+        larghezza: 1920,
+        altezza: 1080,
+        fps_testo: "30".into(),
+        fps: 30.0,
+        durata: 10.0,
+        fotogrammi_totali: 300,
+        audio: None,
+        bit_10,
+        colori,
+    }
+}
+
+#[test]
+fn il_video_esce_con_gli_stessi_colori() {
+    let a = argomenti_codifica(false, &info_prova("h264, yuv420p(tv, bt709), 1920x1080")).join(" ");
+    assert!(a.contains("out_color_matrix=bt709"), "{a}");
+    assert!(a.contains("-colorspace bt709") && a.contains("-color_trc bt709"), "{a}");
+    assert!(a.contains("libx264"), "{a}");
+}
+
+#[test]
+fn il_video_a_10_bit_resta_a_10_bit() {
+    let info = info_prova("hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/arib-std-b67), 3840x2160");
+    let lento = argomenti_codifica(false, &info).join(" ");
+    assert!(lento.contains("libx265") && lento.contains("yuv420p10le") && lento.contains("-color_trc arib-std-b67"), "{lento}");
+    let veloce = argomenti_codifica(true, &info).join(" ");
+    assert!(veloce.contains("hevc_videotoolbox") && veloce.contains("main10") && veloce.contains("p010le"), "{veloce}");
+}
+
+// ---------- stili di copertura ----------
+
+#[test]
+fn gli_stili_coprono_solo_la_zona() {
+    // fotogramma 100x100 tutto bianco, a 8 e a 16 bit
+    let display = Riquadro { x: 30, y: 60, w: 40, h: 20 };
+    for byte_per_canale in [1, 2] {
+        for stile in [Stile::Pixel, Stile::Sfocatura, Stile::Nero, Stile::TintaUnita] {
+            let mut dati = vec![255u8; 100 * 100 * 3 * byte_per_canale];
+            let mut imp = Impostazioni::default();
+            imp.stile = stile;
+            if stile == Stile::Nero {
+                copri_grezzo(&mut dati, 100, 100, byte_per_canale, Some(display), &imp);
+                // il centro del display è nero, l'angolo dell'immagine no
+                let centro = ((70 * 100 + 50) * 3) * byte_per_canale;
+                assert_eq!(dati[centro], 0, "{stile:?} {byte_per_canale}");
+                assert_eq!(dati[0], 255);
+            } else {
+                // su un'immagine tutta bianca gli altri stili non cambiano niente
+                copri_grezzo(&mut dati, 100, 100, byte_per_canale, Some(display), &imp);
+                assert!(dati.iter().all(|&v| v == 255), "{stile:?} {byte_per_canale}");
+            }
+        }
+    }
+}

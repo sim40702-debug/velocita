@@ -12,12 +12,22 @@ use std::thread;
 use rayon::prelude::*;
 
 use crate::rilevamento::{
-    copri, momento_usato, regione_centrale, trova_display, trova_display_con_sicurezza, vicini, zona_da_coprire,
+    copri, copri_grezzo, momento_usato, regione_centrale, trova_display, trova_display_con_sicurezza, vicini, zona_da_coprire,
     Fotogramma, Impostazioni, Inseguitore, Momento, Riquadro,
 };
 
 // Estensioni trattate come foto (tutte le altre vengono aperte come video)
 pub const ESTENSIONI_IMMAGINI: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
+pub const ESTENSIONI_VIDEO: [&str; 5] = ["mp4", "mov", "avi", "mkv", "m4v"];
+
+/// Video o foto che Velocità sa aprire (guarda l'estensione).
+pub fn e_supportato(percorso: &Path) -> bool {
+    let estensione = percorso
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    ESTENSIONI_IMMAGINI.contains(&estensione.as_str()) || ESTENSIONI_VIDEO.contains(&estensione.as_str())
+}
 
 // ==========================================
 // GESTIONE AUTOMATICA DEI CORE CPU
@@ -59,6 +69,22 @@ pub struct InfoVideo {
     pub fotogrammi_totali: u64,
     /// nome del codec audio (es. "aac"), None se il video non ha audio
     pub audio: Option<String>,
+    /// true per i video a 10 bit (o più): vanno elaborati a 16 bit per non perdere colori
+    pub bit_10: bool,
+    /// le informazioni sui colori scritte nel video (None = non ci sono)
+    pub colori: Option<ColoriVideo>,
+}
+
+/// Le informazioni sui colori di un video, con i nomi che usa ffmpeg.
+/// Esempio video HD: spazio "bt709", primari "bt709", trasferimento "bt709", gamma "tv".
+/// Esempio HLG a 10 bit: "bt2020nc", "bt2020", "arib-std-b67".
+#[derive(Clone, Debug, PartialEq)]
+pub struct ColoriVideo {
+    pub spazio: String,
+    pub primari: String,
+    pub trasferimento: String,
+    /// "tv" (normale) o "pc" (gamma completa)
+    pub gamma: String,
 }
 
 /// Crea il comando ffmpeg senza aprire la finestra nera su Windows.
@@ -91,6 +117,8 @@ pub fn leggi_info(ffmpeg: &Path, percorso: &Path) -> Result<InfoVideo, String> {
         durata: 0.0,
         fotogrammi_totali: 0,
         audio: None,
+        bit_10: false,
+        colori: None,
     };
     let mut rotazione = 0;
 
@@ -105,6 +133,11 @@ pub fn leggi_info(ffmpeg: &Path, percorso: &Path) -> Result<InfoVideo, String> {
 
         // Stream #0:0[0x1](und): Video: h264 ..., 1920x1080 [SAR 1:1 DAR 16:9], ..., 29.97 fps, ...
         if riga.starts_with("Stream #") && riga.contains(": Video: ") && info.larghezza == 0 {
+            if let Some(descrizione) = riga.split(": Video: ").nth(1) {
+                let (bit_10, colori) = leggi_formato_colori(descrizione);
+                info.bit_10 = bit_10;
+                info.colori = colori;
+            }
             for pezzo in riga.split([',', ' ']) {
                 if let Some((a, b)) = pezzo.split_once('x') {
                     if let (Ok(w), Ok(h)) = (a.parse::<usize>(), b.parse::<usize>()) {
@@ -158,6 +191,91 @@ pub fn leggi_info(ffmpeg: &Path, percorso: &Path) -> Result<InfoVideo, String> {
 
     info.fotogrammi_totali = (info.durata * info.fps).round().max(1.0) as u64;
     Ok(info)
+}
+
+/// Dalla descrizione del video di ffmpeg, per esempio
+/// "hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/arib-std-b67), 3840x2160, ..."
+/// capisce se è a 10 bit e quali colori usa.
+pub fn leggi_formato_colori(descrizione: &str) -> (bool, Option<ColoriVideo>) {
+    for pezzo in dividi_fuori_parentesi(descrizione) {
+        let nome = pezzo.split('(').next().unwrap_or("").trim();
+        // il formato dei pixel: yuv420p, yuv420p10le, nv12, p010le, ...
+        let e_formato = nome.starts_with("yuv") || nome.starts_with("nv") || nome.starts_with("p01") || nome.starts_with("gbr");
+        if !e_formato {
+            continue;
+        }
+        let bit_10 = nome.contains("10") || nome.contains("12") || nome.contains("16");
+
+        // tra parentesi: "tv, bt709" oppure "tv, bt2020nc/bt2020/arib-std-b67, progressive"
+        let mut gamma = String::new();
+        let mut colori: Option<ColoriVideo> = None;
+        if let Some(dentro) = pezzo.split_once('(').map(|(_, d)| d.trim_end_matches(')')) {
+            for voce in dentro.split(',') {
+                let voce = voce.trim();
+                if voce == "tv" || voce == "pc" {
+                    gamma = voce.to_string();
+                } else if voce.contains('/') {
+                    let parti: Vec<&str> = voce.split('/').collect();
+                    if parti.len() == 3 {
+                        colori = Some(ColoriVideo {
+                            spazio: parti[0].to_string(),
+                            primari: parti[1].to_string(),
+                            trasferimento: parti[2].to_string(),
+                            gamma: String::new(),
+                        });
+                    }
+                } else if voce.starts_with("bt") || voce.starts_with("smpte") {
+                    // un nome solo = spazio, primari e trasferimento uguali
+                    colori = Some(ColoriVideo {
+                        spazio: voce.to_string(),
+                        primari: voce.to_string(),
+                        trasferimento: voce.to_string(),
+                        gamma: String::new(),
+                    });
+                }
+            }
+        }
+        if let Some(c) = colori.as_mut() {
+            c.gamma = if gamma.is_empty() { "tv".to_string() } else { gamma };
+        }
+        return (bit_10, colori);
+    }
+    (false, None)
+}
+
+/// Divide "a, b(c, d), e" in ["a", "b(c, d)", "e"]: le virgole tra parentesi non contano.
+fn dividi_fuori_parentesi(testo: &str) -> Vec<String> {
+    let mut pezzi = Vec::new();
+    let mut attuale = String::new();
+    let mut profondita = 0;
+    for carattere in testo.chars() {
+        match carattere {
+            '(' => profondita += 1,
+            ')' => profondita -= 1,
+            ',' if profondita == 0 => {
+                pezzi.push(attuale.trim().to_string());
+                attuale.clear();
+                continue;
+            }
+            _ => {}
+        }
+        attuale.push(carattere);
+    }
+    pezzi.push(attuale.trim().to_string());
+    pezzi
+}
+
+/// La "matrice" per passare da RGB ai colori del video, con il nome che usa
+/// il filtro scale di ffmpeg. None = il video non dice niente (si lascia com'è).
+fn matrice_colori(info: &InfoVideo) -> Option<&'static str> {
+    let colori = info.colori.as_ref()?;
+    match colori.spazio.as_str() {
+        "bt709" => Some("bt709"),
+        "bt2020nc" | "bt2020c" => Some("bt2020"),
+        "smpte170m" | "bt470bg" => Some("bt601"),
+        "smpte240m" => Some("smpte240m"),
+        _ => None,
+    }
 }
 
 /// "00:03:24.12" -> 204.12 secondi
@@ -279,6 +397,8 @@ pub enum Esito {
 
 /// Elabora tutto il video. `avanzamento(fatti, totali)` viene chiamata
 /// ogni tanto per aggiornare la barra. Se `annulla` diventa true si ferma.
+/// Taglio: (inizio, fine) in secondi. None = tutto il video.
+#[allow(clippy::too_many_arguments)]
 pub fn elabora_video(
     ffmpeg: &Path,
     entrata: &Path,
@@ -286,25 +406,36 @@ pub fn elabora_video(
     imp: &Impostazioni,
     worker: usize,
     annulla: &AtomicBool,
+    taglio: Option<(f64, f64)>,
     mut avanzamento: impl FnMut(u64, u64),
 ) -> Result<Esito, String> {
+    let info = leggi_info(ffmpeg, entrata)?;
     // sul Mac prova prima con il chip del Mac (molto più veloce);
-    // se non va, rifà tutto nel modo di sempre (libx264)
-    if cfg!(target_os = "macos") && videotoolbox_funziona(ffmpeg) {
-        let risultato = elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, &mut avanzamento, true);
+    // se non va, rifà tutto nel modo di sempre (libx264 o libx265)
+    if cfg!(target_os = "macos") && videotoolbox_funziona(ffmpeg, info.bit_10) {
+        let risultato =
+            elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, taglio, &mut avanzamento, true);
         if risultato.is_ok() {
             return risultato;
         }
     }
-    elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, &mut avanzamento, false)
+    elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, taglio, &mut avanzamento, false)
 }
 
 /// Prova veloce: comprime un solo fotogramma nero con il chip del Mac.
 /// Se ffmpeg ci riesce, VideoToolbox funziona su questo computer.
-fn videotoolbox_funziona(ffmpeg: &Path) -> bool {
+fn videotoolbox_funziona(ffmpeg: &Path, bit_10: bool) -> bool {
+    // per i video a 10 bit serve l'HEVC a 10 bit (main10)
+    let codec: &[&str] = if bit_10 {
+        &["-vf", "format=p010le", "-c:v", "hevc_videotoolbox", "-profile:v", "main10"]
+    } else {
+        &["-c:v", "h264_videotoolbox"]
+    };
     let prova = comando_ffmpeg(ffmpeg)
         .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=128x128"])
-        .args(["-frames:v", "1", "-c:v", "h264_videotoolbox", "-f", "null", "-"])
+        .args(["-frames:v", "1"])
+        .args(codec)
+        .args(["-f", "null", "-"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -315,26 +446,56 @@ fn videotoolbox_funziona(ffmpeg: &Path) -> bool {
     }
 }
 
-/// Come comprimere il video.
+/// Come comprimere il video, con gli stessi colori dell'originale.
 /// - veloce = true: usa il chip del Mac (VideoToolbox), con un bitrate alto
 ///   per avere una qualità quasi uguale all'originale
-/// - veloce = false: libx264, qualità quasi uguale all'originale (crf 18)
-fn argomenti_codifica(veloce: bool, info: &InfoVideo) -> Vec<String> {
-    let argomenti: Vec<String> = if veloce {
-        // circa 0.2 bit per pixel: 1080x1920 a 30 fps = circa 12 Mbit/s
-        let kbit = (info.larghezza as f64 * info.altezza as f64 * info.fps.max(1.0) * 0.2 / 1000.0) as u64;
-        let kbit = kbit.max(4000);
-        vec![
-            "-c:v".to_string(), "h264_videotoolbox".to_string(),
-            "-b:v".to_string(), format!("{kbit}k"),
-            "-pix_fmt".to_string(), "yuv420p".to_string(),
-        ]
-    } else {
-        ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"]
-            .iter()
-            .map(|a| a.to_string())
-            .collect()
+/// - veloce = false: libx264 (o libx265 per i 10 bit), crf 18
+/// - video a 10 bit: escono in HEVC a 10 bit, come li fa la videocamera
+pub fn argomenti_codifica(veloce: bool, info: &InfoVideo) -> Vec<String> {
+    let mut argomenti: Vec<String> = Vec::new();
+    let mut aggiungi = |pezzi: &[&str]| {
+        for p in pezzi {
+            argomenti.push(p.to_string());
+        }
     };
+
+    // 1) da RGB ai colori del video, con la stessa matrice dell'originale
+    //    (senza, i programmi come DaVinci mostrano i colori spostati)
+    let formato = match (info.bit_10, veloce) {
+        (true, true) => "p010le",
+        (true, false) => "yuv420p10le",
+        _ => "yuv420p",
+    };
+    let filtro = match (matrice_colori(info), info.colori.as_ref()) {
+        (Some(matrice), Some(colori)) => {
+            format!("scale=out_color_matrix={matrice}:out_range={},format={formato}", colori.gamma)
+        }
+        _ => format!("format={formato}"),
+    };
+    aggiungi(&["-vf", &filtro]);
+
+    // 2) il codec
+    // circa 0.2 bit per pixel: 1080x1920 a 30 fps = circa 12 Mbit/s
+    let kbit = (info.larghezza as f64 * info.altezza as f64 * info.fps.max(1.0) * 0.2 / 1000.0) as u64;
+    let bitrate = format!("{}k", kbit.max(4000));
+    match (info.bit_10, veloce) {
+        (true, true) => aggiungi(&["-c:v", "hevc_videotoolbox", "-profile:v", "main10", "-b:v", &bitrate, "-tag:v", "hvc1"]),
+        (true, false) => aggiungi(&[
+            "-c:v", "libx265", "-preset", "fast", "-crf", "18", "-x265-params", "log-level=error", "-tag:v", "hvc1",
+        ]),
+        (false, true) => aggiungi(&["-c:v", "h264_videotoolbox", "-b:v", &bitrate]),
+        (false, false) => aggiungi(&["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]),
+    }
+
+    // 3) scrive nel file quali colori usa (come l'originale)
+    if let Some(colori) = &info.colori {
+        aggiungi(&[
+            "-colorspace", &colori.spazio,
+            "-color_primaries", &colori.primari,
+            "-color_trc", &colori.trasferimento,
+            "-color_range", &colori.gamma,
+        ]);
+    }
     argomenti
 }
 
@@ -346,11 +507,24 @@ fn elabora_video_con(
     imp: &Impostazioni,
     worker: usize,
     annulla: &AtomicBool,
+    taglio: Option<(f64, f64)>,
     avanzamento: &mut impl FnMut(u64, u64),
     veloce: bool,
 ) -> Result<Esito, String> {
-    let info = leggi_info(ffmpeg, entrata)?;
+    let mut info = leggi_info(ffmpeg, entrata)?;
+    // video a 10 bit: 2 byte per canale (rgb48le), così non si perdono colori
+    let byte_per_canale = if info.bit_10 { 2 } else { 1 };
+    let formato_grezzo = if info.bit_10 { "rgb48le" } else { "rgb24" };
     let dimensione = info.larghezza * info.altezza * 3;
+
+    // solo un pezzo del video: si dice a ffmpeg da dove partire e quanto leggere
+    let mut pezzo: Vec<String> = Vec::new();
+    if let Some((inizio, fine)) = taglio {
+        let inizio = inizio.clamp(0.0, info.durata);
+        let durata = (fine.min(info.durata) - inizio).max(0.1);
+        pezzo = vec!["-ss".into(), format!("{inizio:.3}"), "-t".into(), format!("{durata:.3}")];
+        info.fotogrammi_totali = (durata * info.fps).round().max(1.0) as u64;
+    }
 
     // core da usare per il rilevamento (scelta "Uso CPU")
     let gruppo_core = rayon::ThreadPoolBuilder::new()
@@ -360,9 +534,11 @@ fn elabora_video_con(
 
     // 1) ffmpeg che legge: ci dà i fotogrammi grezzi (RGB)
     let mut lettore = comando_ffmpeg(ffmpeg)
-        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .args(["-hide_banner", "-loglevel", "error"])
+        .args(&pezzo)
+        .arg("-i")
         .arg(entrata)
-        .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .args(["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", formato_grezzo, "-"])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -372,7 +548,7 @@ fn elabora_video_con(
     // 2) ffmpeg che scrive: riceve i fotogrammi coperti e aggiunge l'audio
     let mut argomenti: Vec<String> = vec![
         "-hide_banner", "-loglevel", "error", "-y",
-        "-f", "rawvideo", "-pix_fmt", "rgb24",
+        "-f", "rawvideo", "-pix_fmt", formato_grezzo,
     ]
     .into_iter()
     .map(String::from)
@@ -383,6 +559,8 @@ fn elabora_video_con(
     argomenti.push(info.fps_testo.clone());
     argomenti.push("-i".into());
     argomenti.push("-".into());
+    // l'audio dal file originale (dallo stesso punto, se c'è un taglio)
+    argomenti.extend(pezzo.iter().cloned());
     argomenti.push("-i".into());
     argomenti.push(entrata.to_string_lossy().to_string());
     for a in ["-map", "0:v:0", "-map", "1:a?", "-map_metadata", "1"] {
@@ -439,16 +617,28 @@ fn elabora_video_con(
         }
 
         // 1) legge un gruppo di fotogrammi
+        //    - video a 8 bit: direttamente come Fotogramma
+        //    - video a 10 bit: i byte a 16 bit (grezzi_16) + una copia a 8 bit per il rilevamento
         let mut gruppo: Vec<Fotogramma> = Vec::new();
-        while gruppo.len() < fotogrammi_per_gruppo {
-            let mut foto = Fotogramma::nuovo(info.larghezza, info.altezza);
-            if leggi_tutto(&mut entrata_video, &mut foto.dati[..dimensione]).is_err() {
+        let mut grezzi_16: Vec<Vec<u8>> = Vec::new();
+        while gruppo.len() + grezzi_16.len() < fotogrammi_per_gruppo {
+            let mut dati = vec![0u8; dimensione * byte_per_canale];
+            if leggi_tutto(&mut entrata_video, &mut dati).is_err() {
                 break; // fine del video
             }
-            gruppo.push(foto);
+            if info.bit_10 {
+                grezzi_16.push(dati);
+            } else {
+                gruppo.push(Fotogramma { larghezza: info.larghezza, altezza: info.altezza, dati });
+            }
         }
-        if gruppo.is_empty() {
+        if gruppo.is_empty() && grezzi_16.is_empty() {
             break;
+        }
+        if info.bit_10 {
+            gruppo = gruppo_core.install(|| {
+                grezzi_16.par_iter().map(|g| a_8_bit(g, info.larghezza, info.altezza)).collect()
+            });
         }
 
         // 2) cerca il display in tutti i fotogrammi del gruppo, in parallelo
@@ -464,16 +654,26 @@ fn elabora_video_con(
             }
             da_usare.push(r);
         }
+        let (larghezza, altezza) = (info.larghezza, info.altezza);
         gruppo_core.install(|| {
-            gruppo
-                .par_iter_mut()
-                .zip(da_usare.par_iter())
-                .for_each(|(f, r)| copri(f, *r, imp));
+            if info.bit_10 {
+                grezzi_16
+                    .par_iter_mut()
+                    .zip(da_usare.par_iter())
+                    .for_each(|(g, r)| copri_grezzo(g, larghezza, altezza, 2, *r, imp));
+            } else {
+                gruppo.par_iter_mut().zip(da_usare.par_iter()).for_each(|(f, r)| copri(f, *r, imp));
+            }
         });
 
         // 4) manda i fotogrammi allo scrittore
-        for f in &gruppo {
-            if uscita_video.write_all(&f.dati).is_err() {
+        let da_scrivere: Vec<&[u8]> = if info.bit_10 {
+            grezzi_16.iter().map(|g| g.as_slice()).collect()
+        } else {
+            gruppo.iter().map(|f| f.dati.as_slice()).collect()
+        };
+        for dati in da_scrivere {
+            if uscita_video.write_all(dati).is_err() {
                 errore = Some("ffmpeg si è fermato mentre scriveva il video.".to_string());
                 break;
             }
@@ -661,4 +861,60 @@ pub fn stati_copertura(trovati: &[Option<(Riquadro, f32)>]) -> Vec<u8> {
         stati.push(stato);
     }
     stati
+}
+
+/// Da rgb48le (2 byte per canale) a un Fotogramma a 8 bit, per il rilevamento:
+/// di ogni canale tiene il byte "alto".
+fn a_8_bit(grezzo: &[u8], larghezza: usize, altezza: usize) -> Fotogramma {
+    let dati: Vec<u8> = grezzo.chunks_exact(2).map(|coppia| coppia[1]).collect();
+    Fotogramma { larghezza, altezza, dati }
+}
+
+// ==========================================
+// MINI ANTEPRIMA ANIMATA
+// ==========================================
+
+/// Quanti secondi dura l'anteprima animata, e quanti fotogrammi al secondo.
+pub const SECONDI_ANIMAZIONE: f64 = 3.0;
+pub const FOTOGRAMMI_ANIMAZIONE: f64 = 10.0;
+
+/// Circa 3 secondi del risultato (già coperto), a partire da `posizione` (da 0 a 1).
+/// Usa lo stesso rilevamento, la stessa regolazione e lo stesso stile dell'esportazione.
+pub fn anteprima_animata(
+    ffmpeg: &Path,
+    percorso: &Path,
+    posizione: f64,
+    imp: &Impostazioni,
+) -> Result<Vec<Fotogramma>, String> {
+    let info = leggi_info(ffmpeg, percorso)?;
+    let durata = SECONDI_ANIMAZIONE.min(info.durata);
+    let inizio = (info.durata * posizione.clamp(0.0, 1.0)).min(info.durata - durata).max(0.0);
+    let dimensione = info.larghezza * info.altezza * 3;
+
+    let filtro = format!("fps={FOTOGRAMMI_ANIMAZIONE}");
+    let uscita = comando_ffmpeg(ffmpeg)
+        .args(["-hide_banner", "-loglevel", "error", "-ss", &format!("{inizio:.3}"), "-t", &format!("{durata:.3}"), "-i"])
+        .arg(percorso)
+        .args(["-map", "0:v:0", "-vf", &filtro, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("Non riesco ad avviare ffmpeg: {e}"))?;
+
+    let mut fotogrammi: Vec<Fotogramma> = uscita
+        .stdout
+        .chunks_exact(dimensione)
+        .map(|dati| Fotogramma { larghezza: info.larghezza, altezza: info.altezza, dati: dati.to_vec() })
+        .collect();
+    if fotogrammi.is_empty() {
+        return Err("Non riesco a leggere questo punto del video.".to_string());
+    }
+
+    // cerca il display (in parallelo), poi copre in ordine come nell'esportazione
+    let trovati: Vec<Option<Riquadro>> = fotogrammi.par_iter().map(|f| trova_display(f, imp)).collect();
+    let mut inseguitore = Inseguitore::nuovo();
+    for (foto, trovato) in fotogrammi.iter_mut().zip(trovati) {
+        let riquadro = inseguitore.aggiorna(trovato);
+        copri(foto, riquadro, imp);
+    }
+    Ok(fotogrammi)
 }

@@ -33,6 +33,8 @@ const scelte = {
   usoCpu: "auto",        // auto, 0.25, 0.5, 0.75, 1
   forza: 10,             // dimensione dei blocchi della pixelatura
   margine: 0.15,         // margine attorno al cruscotto
+  margineManuale: false, // true = margine scelto con la barra (da 0 a 50%)
+  stile: "pixel",        // pixel, sfocatura, nero, tinta
   momento: "auto",       // auto, giorno, notte
   colore: "arancione",   // arancione, rosso, giallo, verde, blu, bianco, video
   coloreVideo: [255, 140, 26], // il colore preso cliccando sul display (con "video")
@@ -81,6 +83,9 @@ function mostraSchermata(nome) {
     scegli: "Colore dal video",
   };
   $("barra-sottotitolo").textContent = sottotitoli[nome];
+  if (nome !== "pronto") {
+    fermaAnimazione();
+  }
   // mentre lavora le impostazioni non si aprono
   $("btn-impostazioni").disabled = nome === "corso";
 }
@@ -156,6 +161,7 @@ function sceltaDisplay(file) {
     colore: scelte.colore,
     rgb: scelte.coloreVideo,
     posizione: scelte.posizione,
+    stile: scelte.stile,
   };
 }
 
@@ -217,6 +223,14 @@ function aggiornaSegmentato(idContenitore, valore) {
 
 const ESTENSIONI = ["mp4", "mov", "avi", "mkv", "m4v", "jpg", "jpeg", "png", "webp"];
 
+// sceglie una cartella intera: tutti i video e le foto che contiene
+async function scegliCartella() {
+  const cartella = await tauri.dialog.open({ directory: true });
+  if (cartella) {
+    aggiungiFile([cartella]);
+  }
+}
+
 async function scegliFile() {
   const scelti = await tauri.dialog.open({
     multiple: true,
@@ -234,13 +248,15 @@ async function aggiungiFile(percorsi) {
   if (regolazioneAperta) {
     chiudiRegolazione();
   }
+  // le cartelle diventano i video e le foto che contengono
+  percorsi = await invoke("espandi_percorsi", { percorsi: percorsi });
   // tiene solo i file con un'estensione giusta
   const validi = percorsi.filter((p) => {
     const estensione = p.split(".").pop().toLowerCase();
     return ESTENSIONI.includes(estensione);
   });
   if (validi.length === 0) {
-    mostraErrore("Questo tipo di file non si può usare", "Scegli un video (MP4, MOV, MKV, AVI) o una foto (JPG, PNG, WEBP).");
+    mostraErrore("Nessun file da usare", "Scegli un video (MP4, MOV, MKV, AVI) o una foto (JPG, PNG, WEBP), o una cartella che li contiene.");
     return;
   }
 
@@ -286,11 +302,11 @@ function aggiornaSchedaFile() {
 
   disegnaCoda();
 
-  // durata totale dei video, sopra il bottone Avvia
+  // durata totale dei video (o dei pezzi scelti), sopra il bottone Avvia
   let durata = 0;
   for (const f of coda) {
     if (!f.foto) {
-      durata += f.durata;
+      durata += f.taglio ? f.taglio.fine - f.taglio.inizio : f.durata;
     }
   }
   let riepilogo = testoCoda();
@@ -301,6 +317,9 @@ function aggiornaSchedaFile() {
   $("barra-sottotitolo").textContent = testoCoda();
 
   $("testo-zona").textContent = primo.regolazione ? "Regolata a mano" : "Automatica";
+  aggiornaTaglio();
+  aggiornaCopertura();
+  $("btn-animazione").classList.toggle("nascosto", primo.foto);
   disegnaStriscia();
 
   $("nome-cartella").textContent = scelte.cartella ? nomeDaPercorso(scelte.cartella) : "Accanto al video";
@@ -316,10 +335,17 @@ function disegnaCoda() {
   const lista = $("lista-coda");
   lista.innerHTML = "";
   coda.forEach((file, i) => {
-    const riga = creaRigaFile("button", file, file.foto ? "Foto" : formattaTempo(file.durata));
+    let meta = file.foto ? "Foto" : formattaTempo(file.durata);
+    if (file.taglio) {
+      meta = formattaTempo(file.taglio.inizio) + " – " + formattaTempo(file.taglio.fine);
+    }
+    const riga = creaRigaFile("button", file, meta);
+    riga.dataset.indice = i;
     if (i === indiceAnteprima) {
       riga.classList.add("attivo");
     }
+    // tenendo premuto e trascinando si cambia l'ordine
+    riga.addEventListener("pointerdown", (evento) => iniziaTrascinaRiga(evento, riga));
 
     const togli = document.createElement("span");
     togli.className = "bottone-icona piccolo";
@@ -333,6 +359,10 @@ function disegnaCoda() {
 
     // clic su un file = lo mostra nell'anteprima
     riga.addEventListener("click", () => {
+      if (rigaAppenaSpostata) {
+        rigaAppenaSpostata = false; // era un trascinamento, non un clic
+        return;
+      }
       indiceAnteprima = i;
       aggiornaSchedaFile();
       caricaAnteprima();
@@ -389,6 +419,7 @@ async function caricaAnteprima() {
   if (!file) {
     return;
   }
+  fermaAnimazione();
   numeroAnteprima++;
   const mioNumero = numeroAnteprima;
   const posizione = Number($("cursore-anteprima").value) / 1000;
@@ -465,6 +496,7 @@ async function avvia() {
         margine: Number(scelte.margine),
         debug: $("interruttore-prova").checked,
         display: sceltaDisplay(file),
+        taglio: file.taglio ? [file.taglio.inizio, file.taglio.fine] : null,
       });
 
       if (risultato.interrotto) {
@@ -947,6 +979,15 @@ function disegnaStriscia() {
     ctx.fillStyle = coloreCss(COLORI_STRISCIA[stato]);
     ctx.fillRect(i * passo, 0, passo + 0.5, altezza);
   });
+  // con un taglio, la parte che non viene salvata è più chiara
+  if (file.taglio && file.durata > 0) {
+    ctx.fillStyle = coloreCss("--sfondo");
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(0, 0, (file.taglio.inizio / file.durata) * larghezza, altezza);
+    const fine = (file.taglio.fine / file.durata) * larghezza;
+    ctx.fillRect(fine, 0, larghezza - fine, altezza);
+    ctx.globalAlpha = 1;
+  }
 
   // la scritta sotto
   const legenda = $("legenda");
@@ -986,6 +1027,214 @@ function cliccaStriscia(evento) {
 }
 
 // ==========================================
+// COPERTURA: STILE E MARGINE
+// ==========================================
+
+// mette a posto i controlli della copertura secondo le scelte
+function aggiornaCopertura() {
+  aggiornaSegmentato("scelta-stile", scelte.stile);
+  // "Forza" serve solo per pixel e sfocatura
+  const conForza = scelte.stile === "pixel" || scelte.stile === "sfocatura";
+  $("riga-forza").classList.toggle("nascosto", !conForza);
+  let nota = "Con «Guarda 3 s» vedi il risultato.";
+  if (scelte.stile === "pixel") {
+    nota = "Più forza = quadrati più grandi. " + nota;
+  } else if (scelte.stile === "sfocatura") {
+    nota = "Più forza = più sfocato. " + nota;
+  }
+  $("nota-copertura").textContent = nota;
+
+  // margine: una delle tre misure o "Manuale"
+  if (scelte.margineManuale) {
+    aggiornaSegmentato("scelta-margine", "manuale");
+  } else {
+    aggiornaSegmentato("scelta-margine", scelte.margine);
+  }
+  $("riga-margine-manuale").classList.toggle("nascosto", !scelte.margineManuale);
+  $("cursore-margine").value = Math.round(scelte.margine * 100);
+  $("valore-margine").textContent = Math.round(scelte.margine * 100) + "%";
+}
+
+// ==========================================
+// PARTE DEL VIDEO (TAGLIO)
+// ==========================================
+
+// il punto del video dove sta il cursore, in secondi
+function secondiCursore(file) {
+  return (Number($("cursore-anteprima").value) / 1000) * file.durata;
+}
+
+function aggiornaTaglio() {
+  const file = coda[indiceAnteprima];
+  $("gruppo-taglio").classList.toggle("nascosto", !file || file.foto);
+  if (!file || file.foto) {
+    return;
+  }
+  const inizio = file.taglio ? file.taglio.inizio : 0;
+  const fine = file.taglio ? file.taglio.fine : file.durata;
+  $("testo-inizio").textContent = formattaTempo(inizio);
+  $("testo-fine").textContent = formattaTempo(fine);
+  $("btn-tutto-video").classList.toggle("nascosto", !file.taglio);
+}
+
+// "Da qui" (inizio = true) o "Fino a qui" (inizio = false)
+function segnaTaglio(inizio) {
+  const file = coda[indiceAnteprima];
+  const punto = secondiCursore(file);
+  const taglio = file.taglio ? Object.assign({}, file.taglio) : { inizio: 0, fine: file.durata };
+  if (inizio) {
+    taglio.inizio = punto;
+  } else {
+    taglio.fine = punto;
+  }
+  if (taglio.fine - taglio.inizio < 1) {
+    $("testo-anteprima").textContent = "Il pezzo deve durare almeno 1 secondo: l'inizio va prima della fine.";
+    return;
+  }
+  // dall'inizio alla fine = nessun taglio
+  if (taglio.inizio < 0.05 && taglio.fine > file.durata - 0.05) {
+    file.taglio = null;
+  } else {
+    file.taglio = taglio;
+  }
+  aggiornaSchedaFile();
+}
+
+function togliTaglio() {
+  coda[indiceAnteprima].taglio = null;
+  aggiornaSchedaFile();
+}
+
+// ==========================================
+// MINI ANTEPRIMA ANIMATA
+// ==========================================
+
+let timerAnimazione = null;
+let numeroAnimazione = 0;
+
+async function avviaAnimazione() {
+  if (timerAnimazione) {
+    fermaAnimazione();
+    return;
+  }
+  const file = coda[indiceAnteprima];
+  if (!file || file.foto) {
+    return;
+  }
+  numeroAnimazione++;
+  const mioNumero = numeroAnimazione;
+  $("btn-animazione").disabled = true;
+  $("btn-animazione").querySelector("span").textContent = "Preparo…";
+  try {
+    const immagini = await invoke("anteprima_animata", {
+      percorso: file.percorso,
+      posizione: Number($("cursore-anteprima").value) / 1000,
+      forza: Number(scelte.forza),
+      margine: Number(scelte.margine),
+      display: sceltaDisplay(file),
+    });
+    if (mioNumero !== numeroAnimazione) {
+      return; // nel frattempo è cambiato qualcosa
+    }
+    // fa girare le immagini: 10 al secondo, all'infinito
+    let indice = 0;
+    $("animazione-img").src = immagini[0];
+    $("animazione-img").classList.remove("nascosto");
+    $("anteprima").classList.add("animazione-attiva");
+    timerAnimazione = setInterval(() => {
+      indice = (indice + 1) % immagini.length;
+      $("animazione-img").src = immagini[indice];
+    }, 100);
+    $("btn-animazione").innerHTML = icona("stop") + "<span>Ferma</span>";
+    $("btn-animazione").disabled = false;
+  } catch (errore) {
+    if (mioNumero === numeroAnimazione) {
+      $("testo-anteprima").textContent = "Anteprima animata non disponibile: " + errore;
+      fermaAnimazione();
+    }
+  }
+}
+
+function fermaAnimazione() {
+  numeroAnimazione++;
+  if (timerAnimazione) {
+    clearInterval(timerAnimazione);
+    timerAnimazione = null;
+  }
+  $("animazione-img").classList.add("nascosto");
+  $("anteprima").classList.remove("animazione-attiva");
+  $("btn-animazione").disabled = false;
+  $("btn-animazione").innerHTML = icona("play") + "<span>Guarda 3 s</span>";
+}
+
+// ==========================================
+// CODA: RIORDINARE TRASCINANDO
+// ==========================================
+
+let rigaTrascinata = null;
+// true subito dopo un trascinamento: il "clic" che segue va ignorato
+let rigaAppenaSpostata = false;
+
+function iniziaTrascinaRiga(evento, riga) {
+  if (evento.button !== 0 || evento.target.closest(".bottone-icona")) {
+    return; // la ✕ non fa partire il trascinamento
+  }
+  rigaTrascinata = { riga: riga, y: evento.clientY, spostata: false };
+  // il mouse si segue su tutta la finestra (la riga cambia posto nella lista)
+  window.addEventListener("pointermove", trascinaRiga);
+  window.addEventListener("pointerup", fineTrascinaRiga);
+}
+
+function trascinaRiga(evento) {
+  if (!rigaTrascinata) {
+    return;
+  }
+  // parte solo dopo qualche pixel, così un clic resta un clic
+  if (!rigaTrascinata.spostata && Math.abs(evento.clientY - rigaTrascinata.y) < 5) {
+    return;
+  }
+  rigaTrascinata.spostata = true;
+  const riga = rigaTrascinata.riga;
+  riga.classList.add("trascinata");
+  // mette la riga prima della prima riga che ha il centro sotto il mouse
+  const lista = $("lista-coda");
+  const altre = [...lista.children].filter((r) => r !== riga);
+  let prima = null;
+  for (const altra of altre) {
+    const box = altra.getBoundingClientRect();
+    if (evento.clientY < box.top + box.height / 2) {
+      prima = altra;
+      break;
+    }
+  }
+  lista.insertBefore(riga, prima);
+}
+
+function fineTrascinaRiga() {
+  window.removeEventListener("pointermove", trascinaRiga);
+  window.removeEventListener("pointerup", fineTrascinaRiga);
+  if (!rigaTrascinata) {
+    return;
+  }
+  const spostata = rigaTrascinata.spostata;
+  rigaTrascinata.riga.classList.remove("trascinata");
+  rigaTrascinata = null;
+  if (!spostata) {
+    return;
+  }
+  rigaAppenaSpostata = true;
+  // il nuovo ordine è quello delle righe nella lista
+  const mostrato = coda[indiceAnteprima];
+  coda = [...$("lista-coda").children].map((r) => coda[Number(r.dataset.indice)]);
+  indiceAnteprima = coda.indexOf(mostrato);
+  aggiornaSchedaFile();
+  // il "clic" del trascinamento arriva subito dopo; se non arriva, il prossimo clic vale
+  setTimeout(() => {
+    rigaAppenaSpostata = false;
+  }, 0);
+}
+
+// ==========================================
 // REGOLA LA ZONA A MANO
 // ==========================================
 
@@ -1006,6 +1255,7 @@ function apriRegolazione() {
       "Qui il display non viene trovato: sposta il cursore su un punto verde della striscia, poi premi «Regola…».";
     return;
   }
+  fermaAnimazione();
   regolazioneAperta = true;
   zonaInModifica = Object.assign({}, ultimaAnteprima.zona);
   $("schermata-pronto").classList.add("regolazione-aperta");
@@ -1282,7 +1532,7 @@ async function avvio() {
 
   // mette i valori salvati nei controlli
   aggiornaSegmentato("scelta-cpu", scelte.usoCpu);
-  aggiornaSegmentato("scelta-margine", scelte.margine);
+  aggiornaCopertura();
   aggiornaSegmentato("scelta-momento", scelte.momento);
   aggiornaSegmentato("scelta-posizione", scelte.posizione);
   aggiornaColori();
@@ -1398,13 +1648,48 @@ async function avvio() {
   });
   $("scelta-margine").addEventListener("click", (evento) => {
     const b = evento.target.closest("button");
-    if (b) {
+    if (!b) {
+      return;
+    }
+    if (b.dataset.valore === "manuale") {
+      scelte.margineManuale = true; // si parte dal margine di adesso
+    } else {
+      scelte.margineManuale = false;
       scelte.margine = Number(b.dataset.valore);
-      aggiornaSegmentato("scelta-margine", scelte.margine);
+    }
+    aggiornaCopertura();
+    salvaScelte();
+    caricaAnteprima();
+  });
+  // margine a mano: il numero cambia subito, l'anteprima quando lasci la barra
+  $("cursore-margine").addEventListener("input", (evento) => {
+    $("valore-margine").textContent = evento.target.value + "%";
+  });
+  $("cursore-margine").addEventListener("change", (evento) => {
+    scelte.margine = Number(evento.target.value) / 100;
+    salvaScelte();
+    caricaAnteprima();
+  });
+  $("scelta-stile").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (b) {
+      scelte.stile = b.dataset.valore;
+      aggiornaCopertura();
       salvaScelte();
-      caricaAnteprima();
     }
   });
+
+  // parte del video
+  $("btn-inizio").addEventListener("click", () => segnaTaglio(true));
+  $("btn-fine-taglio").addEventListener("click", () => segnaTaglio(false));
+  $("btn-tutto-video").addEventListener("click", togliTaglio);
+
+  // anteprima animata
+  $("btn-animazione").addEventListener("click", avviaAnimazione);
+
+  // cartelle
+  $("btn-cartella").addEventListener("click", scegliCartella);
+  $("btn-scegli-cartella").addEventListener("click", scegliCartella);
 
   $("scelta-momento").addEventListener("click", (evento) => {
     const b = evento.target.closest("button");

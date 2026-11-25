@@ -19,6 +19,8 @@
     <symbol id="i-video" viewBox="0 0 20 20"><rect x="5.5" y="2.5" width="9" height="15" rx="1.5"/><rect x="7.5" y="11" width="5" height="2.5" stroke-dasharray="1.6 1"/></symbol>
     <symbol id="i-foto" viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="1.5"/><path d="M3.5 14l4-4 3 3 2-2 4 4"/><circle cx="13" cy="7.5" r="1"/></symbol>
     <symbol id="i-freccia" viewBox="0 0 20 20"><path d="M8 5l5 5-5 5"/></symbol>
+    <symbol id="i-play" viewBox="0 0 20 20"><path d="M7 5.5v9l7-4.5z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 20 20"><rect x="6" y="6" width="8" height="8" rx="1"/></symbol>
   </svg>
 
   <!-- BARRA IN ALTO (si può trascinare per spostare la finestra) -->
@@ -52,7 +54,7 @@
         <h2>Trascina qui i video della moto</h2>
         <p>Uno o più video, oppure delle foto. Il numero della velocità viene coperto in automatico.</p>
         <button id="btn-scegli" class="bottone primario">Scegli file…</button>
-        <p class="suggerimento">oppure ⌘O</p>
+        <p class="suggerimento">oppure ⌘O · <button id="btn-scegli-cartella" class="link">scegli una cartella</button></p>
         <p class="formati">MP4 · MOV · MKV · AVI · JPG · PNG · WEBP</p>
       </div>
     </section>
@@ -75,6 +77,11 @@
               <span class="maniglia" data-lato="w"></span>
             </div>
           </div>
+          <!-- mini anteprima animata: 3 secondi del risultato -->
+          <img id="animazione-img" class="animazione nascosto" alt="">
+          <button id="btn-animazione" class="bottone-anteprima" title="Guarda 3 secondi del risultato">
+            <svg class="icona"><use href="#i-play"/></svg><span>Guarda 3 s</span>
+          </button>
           <div id="anteprima-carico" class="anteprima-messaggio">Carico l'anteprima…</div>
           <div id="anteprima-info" class="info-anteprima nascosto"><i id="info-pallino"></i><span id="info-testo"></span></div>
 
@@ -100,7 +107,10 @@
         <div class="pannello-corpo">
           <div class="gruppo-titolo">
             <span>File</span>
-            <button id="btn-cambia-file" class="link">Aggiungi</button>
+            <span class="link-gruppo">
+              <button id="btn-cartella" class="link">Cartella…</button>
+              <button id="btn-cambia-file" class="link">Aggiungi</button>
+            </span>
           </div>
           <div id="lista-coda" class="lista-file"></div>
 
@@ -116,24 +126,57 @@
 
           <div class="gruppo-titolo"><span>Copertura</span></div>
           <div class="riga">
+            <span>Stile</span>
+            <div id="scelta-stile" class="segmentato">
+              <button data-valore="pixel" class="attivo">Pixel</button>
+              <button data-valore="sfocatura">Sfocato</button>
+              <button data-valore="nero">Nero</button>
+              <button data-valore="tinta">Tinta</button>
+            </div>
+          </div>
+          <div id="riga-forza" class="riga">
             <span>Forza</span>
             <input id="cursore-forza" type="range" min="6" max="24" value="10">
             <span id="valore-forza" class="numero-forza">10 px</span>
           </div>
-          <div class="riga">
+          <div class="riga colonna">
             <span>Margine</span>
             <div id="scelta-margine" class="segmentato">
               <button data-valore="0.08">Piccolo</button>
               <button data-valore="0.15" class="attivo">Normale</button>
               <button data-valore="0.25">Grande</button>
+              <button data-valore="manuale">Manuale</button>
             </div>
+          </div>
+          <div id="riga-margine-manuale" class="riga nascosto">
+            <span>Margine a mano</span>
+            <input id="cursore-margine" type="range" min="0" max="50" value="15">
+            <span id="valore-margine" class="numero-forza">15%</span>
           </div>
           <div class="riga">
             <span>Zona</span>
             <span id="testo-zona" class="valore">Automatica</span>
             <button id="btn-regola" class="link">Regola…</button>
           </div>
-          <p class="nota">Più forza = quadrati più grandi.</p>
+          <p id="nota-copertura" class="nota">Più forza = quadrati più grandi. Con «Guarda 3 s» vedi il risultato.</p>
+
+          <div id="gruppo-taglio">
+            <div class="gruppo-titolo">
+              <span>Parte del video</span>
+              <button id="btn-tutto-video" class="link nascosto">Tutto il video</button>
+            </div>
+            <div class="riga">
+              <span>Inizio</span>
+              <span id="testo-inizio" class="valore">0:00</span>
+              <button id="btn-inizio" class="link">Da qui</button>
+            </div>
+            <div class="riga">
+              <span>Fine</span>
+              <span id="testo-fine" class="valore">0:00</span>
+              <button id="btn-fine-taglio" class="link">Fino a qui</button>
+            </div>
+            <p class="nota">Sposta il cursore sotto l'anteprima e premi «Da qui» o «Fino a qui» per salvare solo un pezzo.</p>
+          </div>
         </div>
 
         <div class="pannello-piede">

@@ -251,7 +251,7 @@ button {
   font-weight: 600;
 }
 
-.gruppo-titolo:first-child {
+.pannello-corpo > .gruppo-titolo:first-child {
   margin-top: 0;
 }
 
@@ -1121,4 +1121,83 @@ button.riga-file.attivo:hover {
   font-weight: 500;
   white-space: nowrap;
   pointer-events: none;
+}
+
+/* ---------- MINI ANTEPRIMA ANIMATA ---------- */
+
+.animazione {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: var(--nero);
+}
+
+.bottone-anteprima {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px 0 8px;
+  border: none;
+  border-radius: var(--raggio);
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.bottone-anteprima:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.bottone-anteprima .icona {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.bottone-anteprima:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+/* mentre gira l'animazione la zona tratteggiata non serve */
+.animazione-attiva .zona-rossa,
+.animazione-attiva .info-anteprima {
+  display: none;
+}
+
+.regolazione-aperta .bottone-anteprima {
+  display: none;
+}
+
+/* ---------- PANNELLO: piccole aggiunte ---------- */
+
+.link-gruppo {
+  display: flex;
+  gap: 12px;
+}
+
+/* scelta a segmenti a tutta larghezza (sotto il titolo della riga) */
+.riga.colonna .segmentato {
+  display: flex;
+  margin-left: 0;
+}
+
+.riga.colonna .segmentato button {
+  flex: 1;
+}
+
+/* ---------- CODA: riordinare trascinando ---------- */
+
+.lista-file .riga-file.trascinata {
+  background: var(--controllo);
+  opacity: 0.7;
+  cursor: grabbing;
 }

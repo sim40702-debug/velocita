@@ -142,6 +142,31 @@ impl Regolazione {
     }
 }
 
+/// Come viene coperto il numero.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Stile {
+    /// quadratoni (la grandezza è la "forza")
+    Pixel,
+    /// sfocato (più forza = più sfocato)
+    Sfocatura,
+    /// rettangolo nero
+    Nero,
+    /// rettangolo del colore medio della zona: si nota poco
+    TintaUnita,
+}
+
+impl Stile {
+    /// Dal testo che manda la finestra ("pixel", "sfocatura", "nero", "tinta").
+    pub fn da_nome(nome: &str) -> Stile {
+        match nome {
+            "sfocatura" => Stile::Sfocatura,
+            "nero" => Stile::Nero,
+            "tinta" => Stile::TintaUnita,
+            _ => Stile::Pixel,
+        }
+    }
+}
+
 /// Le scelte dell'utente che cambiano la copertura.
 #[derive(Clone, Copy, Debug)]
 pub struct Impostazioni {
@@ -160,6 +185,8 @@ pub struct Impostazioni {
     pub ovunque: bool,
     /// Zona spostata o ingrandita a mano (per tutto il video)
     pub regolazione: Regolazione,
+    /// Pixel, sfocatura, nero o tinta unita
+    pub stile: Stile,
 }
 
 impl Default for Impostazioni {
@@ -172,6 +199,7 @@ impl Default for Impostazioni {
             colore: ColoreDisplay::da_nome("arancione", [0, 0, 0]),
             ovunque: false,
             regolazione: Regolazione::nessuna(),
+            stile: Stile::Pixel,
         }
     }
 }
@@ -691,54 +719,6 @@ pub fn regione_centrale(r: Riquadro, larghezza: usize, altezza: usize) -> Riquad
 // 3. PIXELATURA
 // ==========================================
 
-/// Pixela la zona: la rimpicciolisce (lineare) e la ringrandisce a blocchi.
-pub fn pixela(foto: &mut Fotogramma, zona: Riquadro, blocco_pixel: u32) {
-    // taglia la zona ai bordi del fotogramma
-    let x0 = zona.x.max(0) as usize;
-    let y0 = zona.y.max(0) as usize;
-    let x1 = ((zona.x + zona.w) as usize).min(foto.larghezza);
-    let y1 = ((zona.y + zona.h) as usize).min(foto.altezza);
-    if x1 <= x0 || y1 <= y0 {
-        return;
-    }
-    let w = x1 - x0;
-    let h = y1 - y0;
-
-    let fattore = 1.max(w.min(h) / blocco_pixel.max(1) as usize);
-    let sw = 1.max(w / fattore);
-    let sh = 1.max(h / fattore);
-
-    // 1) versione piccola (come cv2.resize lineare)
-    let scala_x = w as f32 / sw as f32;
-    let scala_y = h as f32 / sh as f32;
-    let mut piccola = vec![0u8; sw * sh * 3];
-    for py in 0..sh {
-        let (ya, yb, fy) = posizione_lineare(py, scala_y, h);
-        for px in 0..sw {
-            let (xa, xb, fx) = posizione_lineare(px, scala_x, w);
-            for c in 0..3 {
-                let p = |xx: usize, yy: usize| foto.dati[((y0 + yy) * foto.larghezza + x0 + xx) * 3 + c] as f32;
-                let sopra = p(xa, ya) * (1.0 - fx) + p(xb, ya) * fx;
-                let sotto = p(xa, yb) * (1.0 - fx) + p(xb, yb) * fx;
-                let valore = sopra * (1.0 - fy) + sotto * fy;
-                piccola[(py * sw + px) * 3 + c] = valore.round().clamp(0.0, 255.0) as u8;
-            }
-        }
-    }
-
-    // 2) la ringrandisce a blocchi (come cv2.INTER_NEAREST)
-    for yy in 0..h {
-        let py = ((yy * sh) / h).min(sh - 1);
-        for xx in 0..w {
-            let px = ((xx * sw) / w).min(sw - 1);
-            let i = ((y0 + yy) * foto.larghezza + x0 + xx) * 3;
-            let j = (py * sw + px) * 3;
-            foto.dati[i] = piccola[j];
-            foto.dati[i + 1] = piccola[j + 1];
-            foto.dati[i + 2] = piccola[j + 2];
-        }
-    }
-}
 
 /// Per il ridimensionamento lineare: i due pixel da mescolare e quanto.
 fn posizione_lineare(indice: usize, scala: f32, massimo: usize) -> (usize, usize, f32) {
@@ -750,29 +730,6 @@ fn posizione_lineare(indice: usize, scala: f32, massimo: usize) -> (usize, usize
     (a, b, frazione.clamp(0.0, 1.0))
 }
 
-/// Disegna il contorno di un riquadro (spesso 2 pixel), per la modalità prova.
-pub fn disegna_riquadro(foto: &mut Fotogramma, r: Riquadro, colore: [u8; 3]) {
-    let larghezza = foto.larghezza as i32;
-    let altezza = foto.altezza as i32;
-    let mut metti = |x: i32, y: i32| {
-        if x >= 0 && y >= 0 && x < larghezza && y < altezza {
-            let i = (y as usize * foto.larghezza + x as usize) * 3;
-            foto.dati[i] = colore[0];
-            foto.dati[i + 1] = colore[1];
-            foto.dati[i + 2] = colore[2];
-        }
-    };
-    for spessore in 0..2 {
-        for x in r.x..=r.x + r.w {
-            metti(x, r.y + spessore);
-            metti(x, r.y + r.h - spessore);
-        }
-        for y in r.y..=r.y + r.h {
-            metti(r.x + spessore, y);
-            metti(r.x + r.w - spessore, y);
-        }
-    }
-}
 
 // ==========================================
 // 4. SEGUE IL DISPLAY FOTOGRAMMA DOPO FOTOGRAMMA
@@ -879,15 +836,202 @@ fn unisci(a: Riquadro, b: Riquadro) -> Riquadro {
     Riquadro { x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
 }
 
-/// Applica la copertura (o i riquadri di prova) a un fotogramma, dato il
-/// riquadro arancione da usare.
+/// Copre il numero in un fotogramma a 8 bit.
 pub fn copri(foto: &mut Fotogramma, box_display: Option<Riquadro>, imp: &Impostazioni) {
+    let (larghezza, altezza) = (foto.larghezza, foto.altezza);
+    copri_grezzo(&mut foto.dati, larghezza, altezza, 1, box_display, imp);
+}
+
+/// Copre il numero nei byte grezzi di un fotogramma RGB.
+/// byte_per_canale: 1 = video a 8 bit (rgb24), 2 = video a 10 bit (rgb48le).
+/// Lavora su un ritaglio della zona a 16 bit, così lo stesso codice va bene
+/// per tutti e due i tipi di video.
+pub fn copri_grezzo(
+    dati: &mut [u8],
+    larghezza: usize,
+    altezza: usize,
+    byte_per_canale: usize,
+    box_display: Option<Riquadro>,
+    imp: &Impostazioni,
+) {
     let Some(r) = box_display else { return };
-    let centro = zona_da_coprire(r, foto.larghezza, foto.altezza, imp);
+    let zona = zona_da_coprire(r, larghezza, altezza, imp);
+
     if imp.debug {
-        disegna_riquadro(foto, r, [0, 255, 0]);
-        disegna_riquadro(foto, centro, [255, 0, 0]);
+        // modalità prova: verde = display trovato, rosso = zona coperta
+        disegna_bordo(dati, larghezza, altezza, byte_per_canale, r, [0, 65535, 0]);
+        disegna_bordo(dati, larghezza, altezza, byte_per_canale, zona, [65535, 0, 0]);
+        return;
+    }
+
+    // la zona, tagliata ai bordi del fotogramma
+    let x0 = zona.x.max(0) as usize;
+    let y0 = zona.y.max(0) as usize;
+    let x1 = ((zona.x + zona.w).max(0) as usize).min(larghezza);
+    let y1 = ((zona.y + zona.h).max(0) as usize).min(altezza);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let w = x1 - x0;
+    let h = y1 - y0;
+
+    // 1) ritaglia la zona (valori da 0 a 65535)
+    let mut pixel = vec![0u16; w * h * 3];
+    for yy in 0..h {
+        for xx in 0..w {
+            for c in 0..3 {
+                let canale = ((y0 + yy) * larghezza + x0 + xx) * 3 + c;
+                pixel[(yy * w + xx) * 3 + c] = leggi_canale(dati, canale, byte_per_canale);
+            }
+        }
+    }
+
+    // 2) applica lo stile
+    match imp.stile {
+        Stile::Pixel => pixela(&mut pixel, w, h, imp.blocco_pixel),
+        Stile::Sfocatura => sfoca(&mut pixel, w, h, imp.blocco_pixel),
+        Stile::Nero => pixel.fill(0),
+        Stile::TintaUnita => tinta_unita(&mut pixel, w, h),
+    }
+
+    // 3) rimette la zona nel fotogramma
+    for yy in 0..h {
+        for xx in 0..w {
+            for c in 0..3 {
+                let canale = ((y0 + yy) * larghezza + x0 + xx) * 3 + c;
+                scrivi_canale(dati, canale, byte_per_canale, pixel[(yy * w + xx) * 3 + c]);
+            }
+        }
+    }
+}
+
+/// Legge un canale (rosso, verde o blu) come valore da 0 a 65535.
+fn leggi_canale(dati: &[u8], canale: usize, byte_per_canale: usize) -> u16 {
+    if byte_per_canale == 1 {
+        let v = dati[canale] as u16;
+        (v << 8) | v // 255 -> 65535
     } else {
-        pixela(foto, centro, imp.blocco_pixel);
+        u16::from_le_bytes([dati[canale * 2], dati[canale * 2 + 1]])
+    }
+}
+
+/// Scrive un canale da un valore da 0 a 65535.
+fn scrivi_canale(dati: &mut [u8], canale: usize, byte_per_canale: usize, valore: u16) {
+    if byte_per_canale == 1 {
+        dati[canale] = (valore >> 8) as u8;
+    } else {
+        let [a, b] = valore.to_le_bytes();
+        dati[canale * 2] = a;
+        dati[canale * 2 + 1] = b;
+    }
+}
+
+/// Pixel: rimpicciolisce la zona e la ringrandisce a blocchi
+/// (come la versione Python con OpenCV).
+fn pixela(pixel: &mut [u16], w: usize, h: usize, blocco_pixel: u32) {
+    let fattore = 1.max(w.min(h) / blocco_pixel.max(1) as usize);
+    let sw = 1.max(w / fattore);
+    let sh = 1.max(h / fattore);
+
+    // 1) versione piccola (come cv2.resize lineare)
+    let scala_x = w as f32 / sw as f32;
+    let scala_y = h as f32 / sh as f32;
+    let mut piccola = vec![0u16; sw * sh * 3];
+    for py in 0..sh {
+        let (ya, yb, fy) = posizione_lineare(py, scala_y, h);
+        for px in 0..sw {
+            let (xa, xb, fx) = posizione_lineare(px, scala_x, w);
+            for c in 0..3 {
+                let p = |xx: usize, yy: usize| pixel[(yy * w + xx) * 3 + c] as f32;
+                let sopra = p(xa, ya) * (1.0 - fx) + p(xb, ya) * fx;
+                let sotto = p(xa, yb) * (1.0 - fx) + p(xb, yb) * fx;
+                let valore = sopra * (1.0 - fy) + sotto * fy;
+                piccola[(py * sw + px) * 3 + c] = valore.round().clamp(0.0, 65535.0) as u16;
+            }
+        }
+    }
+
+    // 2) la ringrandisce a blocchi (come cv2.INTER_NEAREST)
+    for yy in 0..h {
+        let py = ((yy * sh) / h).min(sh - 1);
+        for xx in 0..w {
+            let px = ((xx * sw) / w).min(sw - 1);
+            for c in 0..3 {
+                pixel[(yy * w + xx) * 3 + c] = piccola[(py * sw + px) * 3 + c];
+            }
+        }
+    }
+}
+
+/// Sfocatura: tre passate di "media dei vicini" in orizzontale e in verticale
+/// (assomiglia a una sfocatura gaussiana). Il raggio cresce con la forza.
+fn sfoca(pixel: &mut [u16], w: usize, h: usize, forza: u32) {
+    let raggio = ((forza as f32 * 1.5) as usize).max(2);
+    for _ in 0..3 {
+        media_in_riga(pixel, w, h, raggio, true);
+        media_in_riga(pixel, w, h, raggio, false);
+    }
+}
+
+/// Ogni pixel diventa la media dei vicini sulla stessa riga (orizzontale = true)
+/// o sulla stessa colonna. Ai bordi usa il pixel del bordo.
+fn media_in_riga(pixel: &mut [u16], w: usize, h: usize, raggio: usize, orizzontale: bool) {
+    let (lunghezza, righe) = if orizzontale { (w, h) } else { (h, w) };
+    let indice = |riga: usize, i: usize| if orizzontale { (riga * w + i) * 3 } else { (i * w + riga) * 3 };
+    let mut copia = vec![0u16; lunghezza * 3];
+    let n = (2 * raggio + 1) as u64;
+    for riga in 0..righe {
+        for i in 0..lunghezza {
+            let j = indice(riga, i);
+            copia[i * 3..i * 3 + 3].copy_from_slice(&pixel[j..j + 3]);
+        }
+        for c in 0..3 {
+            let valore = |i: isize| copia[i.clamp(0, lunghezza as isize - 1) as usize * 3 + c] as u64;
+            // somma della prima finestra, poi la fa "scorrere"
+            let mut somma: u64 = (-(raggio as isize)..=raggio as isize).map(valore).sum();
+            for i in 0..lunghezza {
+                pixel[indice(riga, i) + c] = (somma / n) as u16;
+                somma += valore(i as isize + raggio as isize + 1);
+                somma -= valore(i as isize - raggio as isize);
+            }
+        }
+    }
+}
+
+/// Tinta unita: tutta la zona del colore medio.
+fn tinta_unita(pixel: &mut [u16], w: usize, h: usize) {
+    let mut somma = [0u64; 3];
+    for i in 0..w * h {
+        for c in 0..3 {
+            somma[c] += pixel[i * 3 + c] as u64;
+        }
+    }
+    let quanti = (w * h).max(1) as u64;
+    for i in 0..w * h {
+        for c in 0..3 {
+            pixel[i * 3 + c] = (somma[c] / quanti) as u16;
+        }
+    }
+}
+
+/// Disegna il bordo di un riquadro (modalità prova), spesso 2 pixel.
+fn disegna_bordo(dati: &mut [u8], larghezza: usize, altezza: usize, byte_per_canale: usize, r: Riquadro, colore: [u16; 3]) {
+    let mut metti = |x: i32, y: i32| {
+        if x >= 0 && y >= 0 && x < larghezza as i32 && y < altezza as i32 {
+            for c in 0..3 {
+                let canale = (y as usize * larghezza + x as usize) * 3 + c;
+                scrivi_canale(dati, canale, byte_per_canale, colore[c]);
+            }
+        }
+    };
+    for spessore in 0..2 {
+        for x in r.x..=r.x + r.w {
+            metti(x, r.y + spessore);
+            metti(x, r.y + r.h - spessore);
+        }
+        for y in r.y..=r.y + r.h {
+            metti(r.x + spessore, y);
+            metti(r.x + r.w - spessore, y);
+        }
     }
 }

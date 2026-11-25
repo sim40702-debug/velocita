@@ -13,7 +13,7 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use motore::rilevamento::{ColoreDisplay, Impostazioni, Momento, Regolazione, Riquadro};
+use motore::rilevamento::{ColoreDisplay, Fotogramma, Impostazioni, Momento, Regolazione, Riquadro, Stile};
 use motore::video::{self, Esito};
 
 // diventa true quando l'utente preme "Interrompi"
@@ -53,6 +53,8 @@ struct SceltaDisplay {
     posizione: String,
     /// zona spostata o ingrandita a mano (manca = nessuna regolazione)
     regolazione: Option<RegolazioneFinestra>,
+    /// come coprire: "pixel", "sfocatura", "nero" o "tinta" (manca = pixel)
+    stile: Option<String>,
 }
 
 /// La regolazione della zona come arriva dalla finestra.
@@ -72,6 +74,7 @@ fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) 
         momento: Momento::da_nome(&display.momento),
         colore: ColoreDisplay::da_nome(&display.colore, display.rgb),
         ovunque: display.posizione == "ovunque",
+        stile: Stile::da_nome(display.stile.as_deref().unwrap_or("pixel")),
         regolazione: match &display.regolazione {
             Some(r) => Regolazione { dx: r.dx, dy: r.dy, larghezza: r.larghezza, altezza: r.altezza },
             None => Regolazione::nessuna(),
@@ -132,6 +135,67 @@ struct RispostaAnteprima {
     momento: String,
 }
 
+/// Fotogramma -> immagine JPEG per la finestra ("data:image/jpeg;base64,...").
+/// La rimpicciolisce se è più grande di `massimo` pixel (più veloce da mostrare).
+fn in_jpeg(foto: Fotogramma, massimo: u32) -> Result<String, String> {
+    let (larghezza, altezza) = (foto.larghezza as u32, foto.altezza as u32);
+    let img = image::RgbImage::from_raw(larghezza, altezza, foto.dati).ok_or("Errore interno con l'anteprima.")?;
+    let img = image::DynamicImage::ImageRgb8(img);
+    let img = if larghezza > massimo || altezza > massimo { img.thumbnail(massimo, massimo) } else { img };
+    let mut jpg: Vec<u8> = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut jpg), image::ImageFormat::Jpeg)
+        .map_err(|e| e.to_string())?;
+    Ok(format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(&jpg)))
+}
+
+/// Mini anteprima animata: circa 3 secondi del risultato, come immagini JPEG.
+#[tauri::command]
+async fn anteprima_animata(
+    percorso: String,
+    posizione: f64,
+    forza: u32,
+    margine: f32,
+    display: SceltaDisplay,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let imp = impostazioni(forza, margine, false, &display);
+        let fotogrammi = video::anteprima_animata(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp)?;
+        let mut immagini = Vec::new();
+        for foto in fotogrammi {
+            immagini.push(in_jpeg(foto, 720)?);
+        }
+        Ok(immagini)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Da file e cartelle a una lista di file: le cartelle diventano i video e le
+/// foto che contengono (in ordine di nome). I file già coperti (_speed_blur) si saltano.
+#[tauri::command]
+fn espandi_percorsi(percorsi: Vec<String>) -> Vec<String> {
+    let mut risultato = Vec::new();
+    for percorso in percorsi {
+        let p = PathBuf::from(&percorso);
+        if p.is_dir() {
+            let mut dentro: Vec<PathBuf> = match std::fs::read_dir(&p) {
+                Ok(voci) => voci.filter_map(|v| v.ok()).map(|v| v.path()).collect(),
+                Err(_) => Vec::new(),
+            };
+            dentro.sort();
+            for f in dentro {
+                let nome = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                if f.is_file() && video::e_supportato(&f) && !nome.contains("_speed_blur") && !nome.starts_with('.') {
+                    risultato.push(f.to_string_lossy().to_string());
+                }
+            }
+        } else {
+            risultato.push(percorso);
+        }
+    }
+    risultato
+}
+
 fn in_percentuale(r: Riquadro, larghezza: usize, altezza: usize) -> Zona {
     Zona {
         x: r.x as f64 / larghezza as f64,
@@ -154,18 +218,7 @@ async fn anteprima(
         let a = video::anteprima(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp)?;
         let (larghezza, altezza) = (a.foto.larghezza, a.foto.altezza);
 
-        // immagine più piccola per la finestra (più veloce da mostrare)
-        let img = image::RgbImage::from_raw(larghezza as u32, altezza as u32, a.foto.dati)
-            .ok_or("Errore interno con l'anteprima.")?;
-        let img = image::DynamicImage::ImageRgb8(img);
-        let img = if larghezza > 960 { img.thumbnail(960, 960) } else { img };
-        let mut jpg: Vec<u8> = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut jpg), image::ImageFormat::Jpeg)
-            .map_err(|e| e.to_string())?;
-        let immagine = format!(
-            "data:image/jpeg;base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(&jpg)
-        );
+        let immagine = in_jpeg(a.foto, 960)?;
 
         let zona = a.zona_coperta.map(|r| in_percentuale(r, larghezza, altezza));
         let zona_base = a.zona_base.map(|r| in_percentuale(r, larghezza, altezza));
@@ -297,6 +350,7 @@ async fn elabora(
     margine: f32,
     debug: bool,
     display: SceltaDisplay,
+    taglio: Option<[f64; 2]>,
 ) -> Result<Risultato, String> {
     ANNULLA.store(false, Ordering::Relaxed);
     ferma_analisi(); // il processore serve tutto all'esportazione
@@ -333,6 +387,7 @@ async fn elabora(
             &imp,
             worker,
             &ANNULLA,
+            taglio.map(|t| (t[0], t[1])),
             |fatti, totali| {
                 // aggiorna la barra al massimo 10 volte al secondo
                 if ultimo_invio.elapsed().as_millis() < 100 && fatti < totali {
@@ -381,7 +436,16 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
-        .invoke_handler(tauri::generate_handler![info_file, anteprima, elabora, interrompi, cpu_totali, analizza])
+        .invoke_handler(tauri::generate_handler![
+            info_file,
+            anteprima,
+            anteprima_animata,
+            elabora,
+            interrompi,
+            cpu_totali,
+            analizza,
+            espandi_percorsi
+        ])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Velocità");
 }
