@@ -39,9 +39,22 @@ fn modello() -> Option<&'static Model> {
         .as_ref()
 }
 
-// ogni core del processore ha il suo "rivelatore" (non si possono condividere)
+// ogni core del processore ha il suo "rivelatore" (non si possono condividere).
+// ATTENZIONE: mentre cerca, la libreria delle facce usa anche lei rayon, e
+// rayon può far partire un'altra ricerca sullo stesso core. Per questo il
+// rivelatore si toglie dalla scatola mentre si usa (vedi trova_volti):
+// se arriva un'altra ricerca nel frattempo, se ne crea uno suo.
 thread_local! {
     static RIVELATORE: RefCell<Option<Box<dyn Detector>>> = const { RefCell::new(None) };
+}
+
+fn nuovo_rivelatore(m: &Model) -> Box<dyn Detector> {
+    let mut nuovo = rustface::create_detector_with_model(m.clone());
+    nuovo.set_min_face_size(VOLTO_MINIMO);
+    nuovo.set_score_thresh(SICUREZZA_MINIMA);
+    nuovo.set_pyramid_scale_factor(0.8);
+    nuovo.set_slide_window_step(4, 4);
+    nuovo
 }
 
 /// Trova le facce in un fotogramma. Restituisce i riquadri in pixel.
@@ -67,30 +80,29 @@ pub fn trova_volti(foto: &Fotogramma) -> Vec<Riquadro> {
         }
     }
 
-    // 2) cerca le facce
-    RIVELATORE.with(|cella| {
-        let mut rivelatore = cella.borrow_mut();
-        if rivelatore.is_none() {
-            let mut nuovo = rustface::create_detector_with_model(m.clone());
-            nuovo.set_min_face_size(VOLTO_MINIMO);
-            nuovo.set_score_thresh(SICUREZZA_MINIMA);
-            nuovo.set_pyramid_scale_factor(0.8);
-            nuovo.set_slide_window_step(4, 4);
-            *rivelatore = Some(nuovo);
-        }
-        let immagine = ImageData::new(&grigio, w as u32, h as u32);
-        let trovate = rivelatore.as_mut().unwrap().detect(&immagine);
+    // 2) prende il rivelatore di questo core (togliendolo dalla scatola:
+    //    così, se rayon fa partire un'altra ricerca qui, non si blocca)
+    let mut rivelatore = match RIVELATORE.with(|cella| cella.borrow_mut().take()) {
+        Some(r) => r,
+        None => nuovo_rivelatore(m),
+    };
 
-        // 3) dai pixel dell'immagine piccola a quelli veri
-        let p = passo as i32;
-        trovate
-            .iter()
-            .map(|f| {
-                let b = f.bbox();
-                Riquadro { x: b.x() * p, y: b.y() * p, w: b.width() as i32 * p, h: b.height() as i32 * p }
-            })
-            .collect()
-    })
+    // 3) cerca le facce
+    let immagine = ImageData::new(&grigio, w as u32, h as u32);
+    let trovate = rivelatore.detect(&immagine);
+
+    // 4) rimette il rivelatore nella scatola, per la prossima volta
+    RIVELATORE.with(|cella| *cella.borrow_mut() = Some(rivelatore));
+
+    // 5) dai pixel dell'immagine piccola a quelli veri
+    let p = passo as i32;
+    trovate
+        .iter()
+        .map(|f| {
+            let b = f.bbox();
+            Riquadro { x: b.x() * p, y: b.y() * p, w: b.width() as i32 * p, h: b.height() as i32 * p }
+        })
+        .collect()
 }
 
 /// La zona da coprire per una faccia: un po' più grande (capelli, mento, orecchie).

@@ -379,3 +379,17 @@ fn nei_fotogrammi_della_moto_non_vede_facce() {
         assert!(volti.is_empty(), "{nome}: {volti:?}");
     }
 }
+
+#[test]
+fn le_facce_si_cercano_in_parallelo_senza_bloccarsi() {
+    // durante l'esportazione le facce si cercano in tanti fotogrammi insieme
+    // (rayon), e anche la libreria delle facce usa rayon dentro: prima
+    // questo faceva "RefCell already borrowed"
+    use rayon::prelude::*;
+    let cartella = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fotogrammi");
+    let foto = apri_immagine(&cartella.join("notte_finestra_accesa.jpg")).unwrap();
+    let tanti: Vec<_> = (0..16).map(|_| foto.clone()).collect();
+    let gruppo = rayon::ThreadPoolBuilder::new().num_threads(4).build().unwrap();
+    let risultati: Vec<_> = gruppo.install(|| tanti.par_iter().map(motore::volti::trova_volti).collect());
+    assert_eq!(risultati.len(), 16);
+}

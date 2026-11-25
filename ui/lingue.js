@@ -266,6 +266,8 @@ const TRADUZIONI = {
     "Non sono riuscito a salvare il video. Controlla che ci sia spazio sul disco e riprova.":
       "I couldn't save the video. Check there is space on the disk and try again.",
     "Qualcosa è andato storto con questo file.": "Something went wrong with this file.",
+    "Errore interno di Velocità (non è colpa del video): clicca «Copia dettagli» e mandalo a chi fa l'app.":
+      "Internal Velocità error (not the video's fault): click «Copy details» and send it to the app's developer.",
 
     // ---------- impostazioni ----------
     "Impostazioni": "Settings",
@@ -667,6 +669,8 @@ const TRADUZIONI = {
     "Non sono riuscito a salvare il video. Controlla che ci sia spazio sul disco e riprova.":
       "Ich konnte das Video nicht speichern. Prüfe, ob genug Platz auf der Festplatte ist, und versuch es nochmal.",
     "Qualcosa è andato storto con questo file.": "Mit dieser Datei ist etwas schiefgegangen.",
+    "Errore interno di Velocità (non è colpa del video): clicca «Copia dettagli» e mandalo a chi fa l'app.":
+      "Interner Fehler von Velocità (nicht wegen des Videos): klick auf «Details kopieren» und schick es an den Entwickler der App.",
 
     // ---------- impostazioni ----------
     "Impostazioni": "Einstellungen",

@@ -194,6 +194,9 @@ function erroreSemplice(errore) {
   if (testo.includes("ffmpeg")) {
     return "Non sono riuscito a salvare il video. Controlla che ci sia spazio sul disco e riprova.";
   }
+  if (testo.includes("panicked")) {
+    return "Errore interno di Velocità (non è colpa del video): clicca «Copia dettagli» e mandalo a chi fa l'app.";
+  }
   return "Qualcosa è andato storto con questo file.";
 }
 
