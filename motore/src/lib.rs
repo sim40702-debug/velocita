@@ -3,6 +3,8 @@
 // riscritto in Rust senza OpenCV.
 
 pub mod rilevamento;
+pub mod segui;
 pub mod video;
+pub mod volti;
 
 pub use rilevamento::{ColoreDisplay, Fotogramma, Impostazioni, Inseguitore, Momento, Riquadro};

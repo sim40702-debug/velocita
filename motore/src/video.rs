@@ -12,9 +12,12 @@ use std::thread;
 use rayon::prelude::*;
 
 use crate::rilevamento::{
-    copri, copri_grezzo, momento_usato, regione_centrale, trova_display, trova_display_con_sicurezza, vicini, zona_da_coprire,
-    Fotogramma, Impostazioni, Inseguitore, Momento, Riquadro,
+    copri, copri_grezzo, copri_zona, copri_zona_grezzo, momento_usato, regione_centrale, trova_display,
+    trova_display_con_sicurezza, vicini, zona_da_coprire, zona_fissa_a, Fotogramma, Impostazioni, Inseguitore, Momento,
+    Riquadro, ZonaFissa,
 };
+use crate::segui::Oggetto;
+use crate::volti::{trova_volti, zona_volto, MemoriaVolti};
 
 // Estensioni trattate come foto (tutte le altre vengono aperte come video)
 pub const ESTENSIONI_IMMAGINI: [&str; 4] = ["jpg", "jpeg", "png", "webp"];
@@ -315,6 +318,81 @@ pub struct Anteprima {
     pub zona_base: Option<Riquadro>,
     /// giorno o notte, quello usato per questo fotogramma
     pub momento: Momento,
+    /// true se in questo punto vale una zona fissa disegnata a mano
+    pub fissa: bool,
+    /// le altre zone coperte: facce e oggetti da seguire (in pixel)
+    pub altre: Vec<Riquadro>,
+}
+
+// ==========================================
+// ALTRE COSE DA COPRIRE: FACCE E OGGETTI SEGUITI
+// ==========================================
+
+/// Se l'anteprima o il pezzo esportato parte più tardi di così dopo l'inizio
+/// di un oggetto da seguire, l'oggetto non si segue (non si sa più dov'è).
+const RITARDO_MASSIMO_OGGETTO: f64 = 0.5;
+
+/// Le cose da coprire oltre al display: le facce (se scelto) e gli oggetti
+/// disegnati a mano che si seguono. Va usata in ordine, un fotogramma dopo l'altro.
+struct AltreZone<'a> {
+    zone: &'a [ZonaFissa],
+    /// per ogni zona: l'oggetto che si sta seguendo
+    oggetti: Vec<Option<Oggetto>>,
+    /// per ogni zona: true quando è finita (oltre la fine o oggetto perso)
+    finite: Vec<bool>,
+    memoria_volti: MemoriaVolti,
+}
+
+impl<'a> AltreZone<'a> {
+    fn nuove(zone: &'a [ZonaFissa]) -> AltreZone<'a> {
+        AltreZone {
+            zone,
+            oggetti: zone.iter().map(|_| None).collect(),
+            finite: zone.iter().map(|z| !z.segui).collect(),
+            memoria_volti: MemoriaVolti::nuova(),
+        }
+    }
+
+    /// Le zone da coprire in questo fotogramma (in pixel).
+    /// `volti` = le facce trovate in questo fotogramma.
+    fn per_fotogramma(&mut self, foto: &Fotogramma, secondi: f64, volti: &[Riquadro]) -> Vec<Riquadro> {
+        let (larghezza, altezza) = (foto.larghezza, foto.altezza);
+        let mut lista = Vec::new();
+        for k in 0..self.zone.len() {
+            let z = self.zone[k];
+            if self.finite[k] || secondi < z.inizio - 0.001 {
+                continue;
+            }
+            if secondi > z.fine {
+                self.finite[k] = true;
+                continue;
+            }
+            match self.oggetti[k].as_mut() {
+                // la prima volta: si ricorda com'è fatto l'oggetto
+                None => {
+                    if secondi - z.inizio > RITARDO_MASSIMO_OGGETTO {
+                        self.finite[k] = true;
+                        continue;
+                    }
+                    match Oggetto::nuovo(foto, z.in_pixel(larghezza, altezza)) {
+                        Some(o) => {
+                            lista.push(o.riquadro());
+                            self.oggetti[k] = Some(o);
+                        }
+                        None => self.finite[k] = true,
+                    }
+                }
+                // le altre volte: lo cerca vicino a dove era
+                Some(o) => match o.segui(foto) {
+                    Some(r) => lista.push(r),
+                    None => self.finite[k] = true,
+                },
+            }
+        }
+        let zone_volti: Vec<Riquadro> = volti.iter().map(|v| zona_volto(*v, larghezza, altezza)).collect();
+        lista.extend(self.memoria_volti.aggiorna(&zone_volti));
+        lista
+    }
 }
 
 /// Legge un solo fotogramma al secondo indicato.
@@ -336,19 +414,47 @@ pub fn leggi_fotogramma(ffmpeg: &Path, percorso: &Path, info: &InfoVideo, second
 }
 
 /// Anteprima di un video o di una foto: trova il display senza coprirlo.
-pub fn anteprima(ffmpeg: &Path, percorso: &Path, posizione: f64, imp: &Impostazioni) -> Result<Anteprima, String> {
+pub fn anteprima(
+    ffmpeg: &Path,
+    percorso: &Path,
+    posizione: f64,
+    imp: &Impostazioni,
+    zone_fisse: &[ZonaFissa],
+) -> Result<Anteprima, String> {
+    let mut zona_fissa = None;
     let foto = if e_immagine(percorso) {
         apri_immagine(percorso)?
     } else {
         let info = leggi_info(ffmpeg, percorso)?;
         let secondi = (info.durata * posizione.clamp(0.0, 1.0)).min((info.durata - 0.1).max(0.0));
+        zona_fissa = zona_fissa_a(zone_fisse, secondi);
         leggi_fotogramma(ffmpeg, percorso, &info, secondi)?
     };
     let display = trova_display(&foto, imp);
-    let zona_coperta = display.map(|r| zona_da_coprire(r, foto.larghezza, foto.altezza, imp));
+    let mut zona_coperta = display.map(|r| zona_da_coprire(r, foto.larghezza, foto.altezza, imp));
     let zona_base = display.map(|r| regione_centrale(r, foto.larghezza, foto.altezza));
     let momento = momento_usato(&foto, imp);
-    Ok(Anteprima { foto, display, zona_coperta, zona_base, momento })
+    // qui vale la zona disegnata a mano: si copre quella
+    if let Some(z) = zona_fissa {
+        zona_coperta = Some(z.in_pixel(foto.larghezza, foto.altezza));
+    }
+    // le altre zone: facce e oggetti da seguire che partono proprio qui
+    let mut altre = Vec::new();
+    if imp.volti {
+        for v in trova_volti(&foto) {
+            altre.push(zona_volto(v, foto.larghezza, foto.altezza));
+        }
+    }
+    if !e_immagine(percorso) {
+        let info = leggi_info(ffmpeg, percorso)?;
+        let secondi = info.durata * posizione.clamp(0.0, 1.0);
+        for z in zone_fisse {
+            if z.segui && (secondi - z.inizio).abs() <= RITARDO_MASSIMO_OGGETTO {
+                altre.push(z.in_pixel(foto.larghezza, foto.altezza));
+            }
+        }
+    }
+    Ok(Anteprima { foto, display, zona_coperta, zona_base, momento, fissa: zona_fissa.is_some(), altre })
 }
 
 // ==========================================
@@ -377,7 +483,13 @@ pub fn apri_immagine(percorso: &Path) -> Result<Fotogramma, String> {
 pub fn elabora_foto(entrata: &Path, uscita: &Path, imp: &Impostazioni) -> Result<bool, String> {
     let mut foto = apri_immagine(entrata)?;
     let display = trova_display(&foto, imp);
+    // le facce si cercano prima di coprire (sulla foto ancora pulita)
+    let volti = if imp.volti { trova_volti(&foto) } else { Vec::new() };
     copri(&mut foto, display, imp);
+    for v in volti {
+        let zona = zona_volto(v, foto.larghezza, foto.altezza);
+        copri_zona(&mut foto, zona, imp);
+    }
     let img = image::RgbImage::from_raw(foto.larghezza as u32, foto.altezza as u32, foto.dati)
         .ok_or("Errore interno con la foto.")?;
     img.save(uscita).map_err(|e| format!("Non riesco a salvare la foto: {e}"))?;
@@ -407,34 +519,90 @@ pub fn elabora_video(
     worker: usize,
     annulla: &AtomicBool,
     taglio: Option<(f64, f64)>,
+    zone_fisse: &[ZonaFissa],
     mut avanzamento: impl FnMut(u64, u64),
 ) -> Result<Esito, String> {
     let info = leggi_info(ffmpeg, entrata)?;
-    // sul Mac prova prima con il chip del Mac (molto più veloce);
-    // se non va, rifà tutto nel modo di sempre (libx264 o libx265)
-    if cfg!(target_os = "macos") && videotoolbox_funziona(ffmpeg, info.bit_10) {
-        let risultato =
-            elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, taglio, &mut avanzamento, true);
+    // prova prima con il chip che comprime i video (molto più veloce):
+    // sul Mac il chip del Mac, su Windows la scheda video.
+    // Se non va, rifà tutto nel modo di sempre (libx264 o libx265).
+    for hardware in hardware_da_provare() {
+        if !hardware_funziona(ffmpeg, hardware, info.bit_10) {
+            continue;
+        }
+        let risultato = elabora_video_con(
+            ffmpeg, entrata, uscita, imp, worker, annulla, taglio, zone_fisse, &mut avanzamento, Some(hardware),
+        );
         if risultato.is_ok() {
             return risultato;
         }
     }
-    elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, taglio, &mut avanzamento, false)
+    elabora_video_con(ffmpeg, entrata, uscita, imp, worker, annulla, taglio, zone_fisse, &mut avanzamento, None)
 }
 
-/// Prova veloce: comprime un solo fotogramma nero con il chip del Mac.
-/// Se ffmpeg ci riesce, VideoToolbox funziona su questo computer.
-fn videotoolbox_funziona(ffmpeg: &Path, bit_10: bool) -> bool {
-    // per i video a 10 bit serve l'HEVC a 10 bit (main10)
-    let codec: &[&str] = if bit_10 {
-        &["-vf", "format=p010le", "-c:v", "hevc_videotoolbox", "-profile:v", "main10"]
+/// Il chip che comprime il video al posto del processore.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Hardware {
+    /// il chip del Mac (VideoToolbox)
+    Mac,
+    /// schede video NVIDIA (NVENC)
+    Nvidia,
+    /// grafica Intel (Quick Sync)
+    Intel,
+    /// schede video AMD (AMF)
+    Amd,
+}
+
+impl Hardware {
+    /// Il codec di ffmpeg: H.264 per i video normali, HEVC per quelli a 10 bit.
+    pub fn codec(self, bit_10: bool) -> &'static str {
+        match (self, bit_10) {
+            (Hardware::Mac, false) => "h264_videotoolbox",
+            (Hardware::Mac, true) => "hevc_videotoolbox",
+            (Hardware::Nvidia, false) => "h264_nvenc",
+            (Hardware::Nvidia, true) => "hevc_nvenc",
+            (Hardware::Intel, false) => "h264_qsv",
+            (Hardware::Intel, true) => "hevc_qsv",
+            (Hardware::Amd, false) => "h264_amf",
+            (Hardware::Amd, true) => "hevc_amf",
+        }
+    }
+
+    /// Il formato dei pixel che il chip vuole.
+    fn formato(self, bit_10: bool) -> &'static str {
+        if bit_10 {
+            return "p010le";
+        }
+        match self {
+            Hardware::Intel | Hardware::Amd => "nv12",
+            _ => "yuv420p",
+        }
+    }
+}
+
+/// I chip da provare su questo computer, in ordine.
+fn hardware_da_provare() -> Vec<Hardware> {
+    if cfg!(target_os = "macos") {
+        vec![Hardware::Mac]
+    } else if cfg!(windows) {
+        vec![Hardware::Nvidia, Hardware::Intel, Hardware::Amd]
     } else {
-        &["-c:v", "h264_videotoolbox"]
-    };
+        Vec::new()
+    }
+}
+
+/// Prova veloce: comprime un solo fotogramma nero con quel chip.
+/// Se ffmpeg ci riesce, il chip c'è e funziona su questo computer.
+fn hardware_funziona(ffmpeg: &Path, hardware: Hardware, bit_10: bool) -> bool {
+    let formato = format!("format={}", hardware.formato(bit_10));
+    let mut codec = vec!["-vf", formato.as_str(), "-c:v", hardware.codec(bit_10)];
+    if bit_10 {
+        codec.extend(["-profile:v", "main10"]);
+    }
     let prova = comando_ffmpeg(ffmpeg)
-        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=128x128"])
+        .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=256x256"])
         .args(["-frames:v", "1"])
-        .args(codec)
+        .args(&codec)
         .args(["-f", "null", "-"])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -447,11 +615,11 @@ fn videotoolbox_funziona(ffmpeg: &Path, bit_10: bool) -> bool {
 }
 
 /// Come comprimere il video, con gli stessi colori dell'originale.
-/// - veloce = true: usa il chip del Mac (VideoToolbox), con un bitrate alto
-///   per avere una qualità quasi uguale all'originale
-/// - veloce = false: libx264 (o libx265 per i 10 bit), crf 18
+/// - hardware = Some(...): usa il chip del Mac o la scheda video, con un
+///   bitrate alto per avere una qualità quasi uguale all'originale
+/// - hardware = None: libx264 (o libx265 per i 10 bit), crf 18
 /// - video a 10 bit: escono in HEVC a 10 bit, come li fa la videocamera
-pub fn argomenti_codifica(veloce: bool, info: &InfoVideo) -> Vec<String> {
+pub fn argomenti_codifica(hardware: Option<Hardware>, info: &InfoVideo) -> Vec<String> {
     let mut argomenti: Vec<String> = Vec::new();
     let mut aggiungi = |pezzi: &[&str]| {
         for p in pezzi {
@@ -461,10 +629,10 @@ pub fn argomenti_codifica(veloce: bool, info: &InfoVideo) -> Vec<String> {
 
     // 1) da RGB ai colori del video, con la stessa matrice dell'originale
     //    (senza, i programmi come DaVinci mostrano i colori spostati)
-    let formato = match (info.bit_10, veloce) {
-        (true, true) => "p010le",
-        (true, false) => "yuv420p10le",
-        _ => "yuv420p",
+    let formato = match (hardware, info.bit_10) {
+        (Some(h), _) => h.formato(info.bit_10),
+        (None, true) => "yuv420p10le",
+        (None, false) => "yuv420p",
     };
     let filtro = match (matrice_colori(info), info.colori.as_ref()) {
         (Some(matrice), Some(colori)) => {
@@ -478,13 +646,27 @@ pub fn argomenti_codifica(veloce: bool, info: &InfoVideo) -> Vec<String> {
     // circa 0.2 bit per pixel: 1080x1920 a 30 fps = circa 12 Mbit/s
     let kbit = (info.larghezza as f64 * info.altezza as f64 * info.fps.max(1.0) * 0.2 / 1000.0) as u64;
     let bitrate = format!("{}k", kbit.max(4000));
-    match (info.bit_10, veloce) {
-        (true, true) => aggiungi(&["-c:v", "hevc_videotoolbox", "-profile:v", "main10", "-b:v", &bitrate, "-tag:v", "hvc1"]),
-        (true, false) => aggiungi(&[
+    match hardware {
+        Some(h) => {
+            aggiungi(&["-c:v", h.codec(info.bit_10)]);
+            // impostazioni di qualità di ogni chip
+            match h {
+                Hardware::Nvidia => aggiungi(&["-preset", "p5"]),
+                Hardware::Amd => aggiungi(&["-quality", "quality"]),
+                _ => {}
+            }
+            if info.bit_10 {
+                aggiungi(&["-profile:v", "main10"]);
+            }
+            aggiungi(&["-b:v", &bitrate]);
+            if info.bit_10 {
+                aggiungi(&["-tag:v", "hvc1"]); // così il Mac e DaVinci lo leggono
+            }
+        }
+        None if info.bit_10 => aggiungi(&[
             "-c:v", "libx265", "-preset", "fast", "-crf", "18", "-x265-params", "log-level=error", "-tag:v", "hvc1",
         ]),
-        (false, true) => aggiungi(&["-c:v", "h264_videotoolbox", "-b:v", &bitrate]),
-        (false, false) => aggiungi(&["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]),
+        None => aggiungi(&["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"]),
     }
 
     // 3) scrive nel file quali colori usa (come l'originale)
@@ -508,8 +690,9 @@ fn elabora_video_con(
     worker: usize,
     annulla: &AtomicBool,
     taglio: Option<(f64, f64)>,
+    zone_fisse: &[ZonaFissa],
     avanzamento: &mut impl FnMut(u64, u64),
-    veloce: bool,
+    hardware: Option<Hardware>,
 ) -> Result<Esito, String> {
     let mut info = leggi_info(ffmpeg, entrata)?;
     // video a 10 bit: 2 byte per canale (rgb48le), così non si perdono colori
@@ -519,9 +702,12 @@ fn elabora_video_con(
 
     // solo un pezzo del video: si dice a ffmpeg da dove partire e quanto leggere
     let mut pezzo: Vec<String> = Vec::new();
+    // il secondo del video da cui si parte (serve per le zone fisse)
+    let mut secondo_iniziale = 0.0;
     if let Some((inizio, fine)) = taglio {
         let inizio = inizio.clamp(0.0, info.durata);
         let durata = (fine.min(info.durata) - inizio).max(0.1);
+        secondo_iniziale = inizio;
         pezzo = vec!["-ss".into(), format!("{inizio:.3}"), "-t".into(), format!("{durata:.3}")];
         info.fotogrammi_totali = (durata * info.fps).round().max(1.0) as u64;
     }
@@ -567,7 +753,7 @@ fn elabora_video_con(
         argomenti.push(a.into());
     }
     // come comprimere il video (chip del Mac o libx264)
-    argomenti.extend(argomenti_codifica(veloce, &info));
+    argomenti.extend(argomenti_codifica(hardware, &info));
     // l'audio si copia così com'è se l'mp4 lo accetta, altrimenti diventa AAC
     let audio_copiabile = matches!(info.audio.as_deref(), Some("aac") | Some("mp3") | Some("alac") | Some("ac3"));
     if audio_copiabile {
@@ -605,6 +791,7 @@ fn elabora_video_con(
     // su più core insieme, poi si copre in ordine
     let fotogrammi_per_gruppo = (worker * 4).max(4);
     let mut inseguitore = Inseguitore::nuovo();
+    let mut altre_zone = AltreZone::nuove(zone_fisse);
     let mut fatti: u64 = 0;
     let mut coperti: u64 = 0;
     let mut interrotto = false;
@@ -641,28 +828,57 @@ fn elabora_video_con(
             });
         }
 
-        // 2) cerca il display in tutti i fotogrammi del gruppo, in parallelo
+        // 2) cerca il display (e le facce, se scelto) in tutti i fotogrammi del gruppo, in parallelo
         let trovati: Vec<Option<Riquadro>> =
             gruppo_core.install(|| gruppo.par_iter().map(|f| trova_display(f, imp)).collect());
+        let volti: Vec<Vec<Riquadro>> = if imp.volti {
+            gruppo_core.install(|| gruppo.par_iter().map(trova_volti).collect())
+        } else {
+            vec![Vec::new(); gruppo.len()]
+        };
 
-        // 3) in ordine: decide il riquadro da usare (persistenza) e copre
-        let mut da_usare = Vec::new();
-        for t in trovati {
+        // 3) in ordine: decide il riquadro da usare (persistenza) e copre.
+        //    Dove c'è una zona fissa (disegnata a mano) si copre quella.
+        let (larghezza, altezza) = (info.larghezza, info.altezza);
+        let mut da_usare: Vec<Option<Riquadro>> = Vec::new();
+        let mut fisse: Vec<Option<Riquadro>> = Vec::new();
+        let mut altre: Vec<Vec<Riquadro>> = Vec::new();
+        for (i, t) in trovati.into_iter().enumerate() {
             let r = inseguitore.aggiorna(t);
-            if r.is_some() {
+            let secondi = secondo_iniziale + (fatti + i as u64) as f64 / info.fps.max(1.0);
+            let fissa = zona_fissa_a(zone_fisse, secondi).map(|z| z.in_pixel(larghezza, altezza));
+            if r.is_some() || fissa.is_some() {
                 coperti += 1;
             }
             da_usare.push(r);
+            fisse.push(fissa);
+            altre.push(altre_zone.per_fotogramma(&gruppo[i], secondi, &volti[i]));
         }
-        let (larghezza, altezza) = (info.larghezza, info.altezza);
         gruppo_core.install(|| {
             if info.bit_10 {
-                grezzi_16
-                    .par_iter_mut()
-                    .zip(da_usare.par_iter())
-                    .for_each(|(g, r)| copri_grezzo(g, larghezza, altezza, 2, *r, imp));
+                grezzi_16.par_iter_mut().zip(da_usare.par_iter()).zip(fisse.par_iter()).zip(altre.par_iter()).for_each(
+                    |(((g, r), fissa), altre)| {
+                        match fissa {
+                            Some(zona) => copri_zona_grezzo(g, larghezza, altezza, 2, *zona, imp),
+                            None => copri_grezzo(g, larghezza, altezza, 2, *r, imp),
+                        }
+                        for zona in altre {
+                            copri_zona_grezzo(g, larghezza, altezza, 2, *zona, imp);
+                        }
+                    },
+                );
             } else {
-                gruppo.par_iter_mut().zip(da_usare.par_iter()).for_each(|(f, r)| copri(f, *r, imp));
+                gruppo.par_iter_mut().zip(da_usare.par_iter()).zip(fisse.par_iter()).zip(altre.par_iter()).for_each(
+                    |(((f, r), fissa), altre)| {
+                        match fissa {
+                            Some(zona) => copri_zona(f, *zona, imp),
+                            None => copri(f, *r, imp),
+                        }
+                        for zona in altre {
+                            copri_zona(f, *zona, imp);
+                        }
+                    },
+                );
             }
         });
 
@@ -885,6 +1101,7 @@ pub fn anteprima_animata(
     percorso: &Path,
     posizione: f64,
     imp: &Impostazioni,
+    zone_fisse: &[ZonaFissa],
 ) -> Result<Vec<Fotogramma>, String> {
     let info = leggi_info(ffmpeg, percorso)?;
     let durata = SECONDI_ANIMAZIONE.min(info.durata);
@@ -911,10 +1128,25 @@ pub fn anteprima_animata(
 
     // cerca il display (in parallelo), poi copre in ordine come nell'esportazione
     let trovati: Vec<Option<Riquadro>> = fotogrammi.par_iter().map(|f| trova_display(f, imp)).collect();
+    let volti: Vec<Vec<Riquadro>> =
+        if imp.volti { fotogrammi.par_iter().map(trova_volti).collect() } else { vec![Vec::new(); fotogrammi.len()] };
     let mut inseguitore = Inseguitore::nuovo();
-    for (foto, trovato) in fotogrammi.iter_mut().zip(trovati) {
+    let mut altre_zone = AltreZone::nuove(zone_fisse);
+    for (i, (foto, trovato)) in fotogrammi.iter_mut().zip(trovati).enumerate() {
         let riquadro = inseguitore.aggiorna(trovato);
-        copri(foto, riquadro, imp);
+        let secondi = inizio + i as f64 / FOTOGRAMMI_ANIMAZIONE;
+        // prima si decide cosa coprire (guardando il fotogramma ancora pulito)
+        let altre = altre_zone.per_fotogramma(foto, secondi, &volti[i]);
+        for zona in altre {
+            copri_zona(foto, zona, imp);
+        }
+        match zona_fissa_a(zone_fisse, secondi) {
+            Some(z) => {
+                let zona = z.in_pixel(foto.larghezza, foto.altezza);
+                copri_zona(foto, zona, imp);
+            }
+            None => copri(foto, riquadro, imp),
+        }
     }
     Ok(fotogrammi)
 }

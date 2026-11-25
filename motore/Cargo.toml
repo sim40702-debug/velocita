@@ -5,4 +5,6 @@ edition = "2021"
 
 [dependencies]
 rayon = "1"
+# riconoscimento dei volti (SeetaFace, licenza BSD: vedi modelli/LICENZA_seeta_fd.txt)
+rustface = "0.1.7"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }

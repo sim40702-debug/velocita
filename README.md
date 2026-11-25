@@ -9,9 +9,10 @@ Fatta con **Tauri**: la finestra è in HTML/CSS/JS, il lavoro lo fa Rust, video 
 
 | Cartella | Cosa c'è |
 |---|---|
-| `ui/` | la finestra: `index.html`, `stile.css`, `app.js` |
+| `ui/` | la finestra: `index.html`, `stile.css`, `app.js`, e le traduzioni in `lingue.js` |
 | `src-tauri/` | l'app Tauri: comandi che la finestra chiama (`src/main.rs`) e impostazioni (`tauri.conf.json`) |
-| `motore/` | il motore in Rust: trova il cruscotto e pixela (`rilevamento.rs`), legge e scrive i video (`video.rs`) |
+| `motore/` | il motore in Rust: trova il cruscotto e pixela (`rilevamento.rs`), legge e scrive i video (`video.rs`), trova le facce (`volti.rs`), segue gli oggetti come le targhe (`segui.rs`) |
+| `motore/modelli/` | il modello per riconoscere le facce (SeetaFace, licenza BSD in `LICENZA_seeta_fd.txt`) |
 | `scripts/prendi_ffmpeg.py` | scarica ffmpeg per il computer giusto |
 | `.github/workflows/release.yml` | crea gli installer e la release quando carichi un tag |
 
@@ -60,6 +61,7 @@ Sul Mac ci sono anche nel menu in alto (Aiuto › Scorciatoie da tastiera).
 - **Frecce sulla striscia**: salta al prossimo punto da controllare
 - **I** e **O**: inizio e fine del pezzo da salvare
 - **Spazio**: guarda 3 secondi del risultato
+- **R**: originale o risultato · **F**: schermo intero (Esc per uscire)
 - **⌥↑ ⌥↓**: cambia l'ordine della coda · **Canc**: togli il file selezionato
 - **Regola la zona**: frecce per spostare, ⇧ + frecce per la grandezza, ↩ applica, Esc annulla
 - **Esc**: chiude le Impostazioni
@@ -76,6 +78,32 @@ Sul Mac ci sono anche nel menu in alto (Aiuto › Scorciatoie da tastiera).
 - Se il lavoro dura da più di un minuto, «Interrompi» chiede conferma. Anche
   chiudere la finestra mentre lavora chiede conferma.
 
+## Zone a mano, targhe e volti
+
+- **Zone a mano** ("Copri qui…" o "Copri a mano un tratto rosso"): dove il display
+  non viene trovato disegni tu il rettangolo da coprire, e scegli da quando a quando
+  vale (‹ › = mezzo secondo). Sulla striscia quei tratti diventano blu.
+- **Segue** (nella stessa barra): invece di restare ferma, la zona va dietro
+  all'oggetto che si muove, per esempio una **targa**. Disegnala nel punto dove
+  l'oggetto compare: da lì lo segue finché lo vede.
+- **Copri anche i volti** (in "Per tutti i video"): copre le facce delle persone
+  viste di fronte. Rende l'esportazione più lenta.
+- **Velocità in sottotitoli** non c'è: nei video della Osmo Nano il numero sul
+  display è troppo piccolo e sfocato per leggerlo, anche a occhio.
+
+## Altre comodità
+
+- **Originale / Risultato** in alto a sinistra nell'anteprima, e **schermo intero**.
+- **Preset**: salvi stile, forza, margine e display con un nome e li riusi con un clic.
+- **Cartella sorvegliata** (Impostazioni › Generale): con l'app aperta, i video
+  nuovi messi lì vengono coperti da soli.
+- Mentre esporta il computer **non va in stop**, e il file finito ha la **stessa
+  data** dell'originale (così in DaVinci resta in ordine).
+- La barra di avanzamento si vede anche sull'icona (Dock del Mac, barra di Windows).
+- Su Windows il video si crea con la **scheda video** (NVIDIA, Intel o AMD), se c'è.
+- **Lingue**: italiano, inglese e tedesco (Impostazioni › Generale › Lingua).
+  Per aggiungere una frase: scrivila in italiano nel codice e mettila in `ui/lingue.js`.
+
 ## Test automatici
 
 ```bash
@@ -83,7 +111,8 @@ cargo test -p motore
 ```
 
 Controlla che il display venga trovato nei fotogrammi di esempio in
-`motore/tests/fotogrammi` (lampioni, muri, strada illuminata, riflessi...).
+`motore/tests/fotogrammi` (lampioni, muri, strada illuminata, riflessi...),
+e anche zone a mano, oggetti seguiti, facce, colori e schede video.
 GitHub Actions li fa girare prima di ogni release: se un test fallisce, la
 release non viene creata.
 

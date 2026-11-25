@@ -11,6 +11,8 @@
   <svg class="nascosto" aria-hidden="true">
     <symbol id="i-impostazioni" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
     <symbol id="i-maniglia" viewBox="0 0 20 20"><circle cx="8" cy="6" r="0.5"/><circle cx="12" cy="6" r="0.5"/><circle cx="8" cy="10" r="0.5"/><circle cx="12" cy="10" r="0.5"/><circle cx="8" cy="14" r="0.5"/><circle cx="12" cy="14" r="0.5"/></symbol>
+    <symbol id="i-schermo" viewBox="0 0 20 20"><path d="M4 8V4h4M12 4h4v4M16 12v4h-4M8 16H4v-4"/></symbol>
+    <symbol id="i-riduci" viewBox="0 0 20 20"><path d="M8 4v4H4M16 8h-4V4M12 16v-4h4M4 12h4v4"/></symbol>
     <symbol id="i-copia" viewBox="0 0 20 20"><rect x="7" y="7" width="9" height="9" rx="1.5"/><path d="M13 4.5H5.5a1 1 0 0 0-1 1V13"/></symbol>
     <symbol id="i-piu" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
     <symbol id="i-cartella" viewBox="0 0 20 20"><path d="M3 6.5V15a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H9.5L8 5H4a1 1 0 0 0-1 1.5z"/></symbol>
@@ -78,24 +80,47 @@
               <span class="maniglia" data-lato="sw"></span>
               <span class="maniglia" data-lato="w"></span>
             </div>
+            <!-- le altre zone coperte: facce e oggetti seguiti -->
+            <div id="anteprima-altre"></div>
           </div>
           <!-- mini anteprima animata: 3 secondi del risultato -->
           <img id="animazione-img" class="animazione nascosto" alt="">
-          <button id="btn-animazione" class="bottone-anteprima" title="Guarda 3 secondi del risultato">
+          <button id="btn-animazione" class="bottone-anteprima" title="Guarda 3 secondi del risultato (Spazio)">
             <svg class="icona"><use href="#i-play"/></svg><span>Guarda 3 s</span>
           </button>
+          <button id="btn-schermo" class="bottone-anteprima solo-icona" title="Schermo intero (F)" aria-label="Schermo intero">
+            <svg class="icona contorno"><use href="#i-schermo"/></svg>
+          </button>
+          <!-- il video com'è adesso o come sarà coperto -->
+          <div id="scelta-vista" class="segmentato scuro vista-anteprima" title="Tasto R">
+            <button data-valore="originale" class="attivo">Originale</button>
+            <button data-valore="risultato">Risultato</button>
+          </div>
           <div id="anteprima-carico" class="anteprima-messaggio">Carico l'anteprima…</div>
           <div id="anteprima-info" class="info-anteprima nascosto"><i id="info-pallino"></i><span id="info-testo"></span></div>
 
           <!-- comandi mentre regoli la zona -->
           <div id="barra-regola" class="barra-regola nascosto">
             <span title="Con le frecce sposti, con Maiusc + frecce cambi la grandezza">Trascina o tira gli angoli</span>
+            <!-- solo per le zone a mano: da quando a quando vale -->
+            <span id="tempi-fissa" class="tempi-fissa">
+              Dal
+              <button class="passo" data-quale="inizio" data-passo="-0.5" title="Mezzo secondo prima" aria-label="Inizio prima">‹</button><b id="fissa-inizio">0:00</b><button class="passo" data-quale="inizio" data-passo="0.5" title="Mezzo secondo dopo" aria-label="Inizio dopo">›</button>
+              al
+              <button class="passo" data-quale="fine" data-passo="-0.5" title="Mezzo secondo prima" aria-label="Fine prima">‹</button><b id="fissa-fine">0:00</b><button class="passo" data-quale="fine" data-passo="0.5" title="Mezzo secondo dopo" aria-label="Fine dopo">›</button>
+            </span>
+            <!-- zona a mano: ferma oppure segue l'oggetto (per esempio una targa) -->
+            <div id="scelta-segui" class="segmentato scuro" title="«Segue» va dietro all'oggetto che si muove, per esempio una targa">
+              <button data-valore="ferma" class="attivo">Ferma</button>
+              <button data-valore="segue">Segue</button>
+            </div>
             <span class="vale-per">Vale per</span>
             <div id="scelta-vale" class="segmentato scuro">
               <button data-valore="questo" class="attivo">Questo video</button>
               <button data-valore="tutti">Tutti i video</button>
             </div>
             <button id="btn-regola-ripristina" class="bottone scuro piccolo">Ripristina</button>
+            <button id="btn-fissa-elimina" class="bottone scuro piccolo">Elimina</button>
             <button id="btn-regola-annulla" class="bottone scuro piccolo">Annulla</button>
             <button id="btn-regola-fatto" class="bottone primario piccolo">Applica</button>
           </div>
@@ -140,6 +165,12 @@
               <span id="testo-zona" class="valore">Automatica</span>
               <button id="btn-regola" class="link">Regola…</button>
             </div>
+            <div id="riga-fisse" class="riga">
+              <span title="Dove il display non viene trovato, disegni tu cosa coprire">Zone a mano</span>
+              <span id="testo-fisse" class="valore">Nessuna</span>
+              <button id="btn-fissa-nuova" class="link" title="Disegna una zona da coprire: ferma, o che segue un oggetto come una targa">Copri qui…</button>
+            </div>
+            <div id="lista-fisse" class="lista-fisse"></div>
             <div id="riga-parte" class="riga">
               <span>Parte</span>
               <span id="testo-parte" class="valore">Tutto il video</span>
@@ -153,6 +184,11 @@
             <span id="riassunto-tutti" class="riassunto"></span>
           </button>
           <div id="gruppo-tutti">
+            <!-- impostazioni salvate con un nome -->
+            <div class="riga colonna">
+              <span>Preset</span>
+              <div id="lista-preset" class="lista-preset"></div>
+            </div>
             <div class="riga">
               <span>Stile</span>
               <div id="scelta-stile" class="segmentato">
@@ -180,6 +216,13 @@
               <span>Margine a mano</span>
               <input id="cursore-margine" type="range" min="0" max="50" value="15" aria-label="Margine a mano">
               <span id="valore-margine" class="numero-forza">15%</span>
+            </div>
+            <div class="riga">
+              <span title="Copre anche le facce delle persone viste di fronte">Copri anche i volti</span>
+              <label class="interruttore">
+                <input id="interruttore-volti" type="checkbox">
+                <span></span>
+              </label>
             </div>
             <p id="nota-copertura" class="nota">Più forza = quadrati più grandi. Con «Guarda 3 s» vedi il risultato.</p>
             <div class="riga">
@@ -292,6 +335,29 @@
               <span></span>
             </label>
           </div>
+          <!-- lingua dell'app -->
+          <div class="riga">
+            <span>Lingua</span>
+            <div id="scelta-lingua" class="segmentato">
+              <button data-valore="auto" class="attivo">Auto</button>
+              <button data-valore="it">Italiano</button>
+              <button data-valore="en">English</button>
+              <button data-valore="de">Deutsch</button>
+            </div>
+          </div>
+          <p id="nota-lingua" class="nota nascosto">La lingua cambia al prossimo avvio di Velocità.</p>
+          <!-- cartella sorvegliata: i video nuovi si coprono da soli -->
+          <div class="riga">
+            <div class="riga-testi">
+              <span>Cartella sorvegliata</span>
+              <span class="aiuto">Con Velocità aperta, i video nuovi messi in questa cartella vengono coperti da soli (con le impostazioni di adesso).</span>
+            </div>
+            <span id="nome-sorvegliata" class="valore">Nessuna</span>
+            <button id="btn-togli-sorvegliata" class="bottone-icona piccolo nascosto" title="Smetti di sorvegliare" aria-label="Smetti di sorvegliare">
+              <svg class="icona"><use href="#i-x"/></svg>
+            </button>
+            <button id="btn-scegli-sorvegliata" class="link">Scegli…</button>
+          </div>
           <p class="nota">Forza e margine della copertura si regolano a destra dell'anteprima, mentre guardi il video.</p>
         </div>
 
@@ -358,7 +424,7 @@
               <button data-valore="1">100%</button>
             </div>
           </div>
-          <p class="nota">Sul Mac il video viene creato con il chip del Mac, quando è possibile: è molto più veloce.</p>
+          <p class="nota">Quando è possibile il video viene creato con il chip del Mac o con la scheda video su Windows (NVIDIA, Intel, AMD): è molto più veloce.</p>
         </div>
 
         <!-- Aggiornamenti -->
@@ -415,6 +481,7 @@
     <div class="dialogo" role="alertdialog" aria-modal="true" aria-labelledby="dialogo-titolo" aria-describedby="dialogo-testo">
       <h3 id="dialogo-titolo"></h3>
       <p id="dialogo-testo"></p>
+      <input id="dialogo-campo" class="campo nascosto" type="text" maxlength="30" aria-label="Nome">
       <div class="dialogo-bottoni">
         <button id="dialogo-no" class="bottone secondario"></button>
         <button id="dialogo-si" class="bottone primario"></button>
@@ -422,6 +489,7 @@
     </div>
   </div>
 
+  <script src="lingue.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -187,6 +187,8 @@ pub struct Impostazioni {
     pub regolazione: Regolazione,
     /// Pixel, sfocatura, nero o tinta unita
     pub stile: Stile,
+    /// Copre anche le facce delle persone
+    pub volti: bool,
 }
 
 impl Default for Impostazioni {
@@ -200,8 +202,44 @@ impl Default for Impostazioni {
             ovunque: false,
             regolazione: Regolazione::nessuna(),
             stile: Stile::Pixel,
+            volti: false,
         }
     }
+}
+
+/// Un pezzo del video dove la zona da coprire l'hai disegnata tu:
+/// da `inizio` a `fine` (in secondi) si copre questo rettangolo e basta,
+/// senza cercare il display. Serve per i tratti rossi della striscia.
+/// x, y, w, h sono in percentuale dell'immagine (da 0 a 1).
+/// Con `segui` = true invece la zona parte da lì (al secondo `inizio`) e
+/// segue l'oggetto che si muove (per esempio una targa), oltre al display.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZonaFissa {
+    pub inizio: f64,
+    pub fine: f64,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub segui: bool,
+}
+
+impl ZonaFissa {
+    /// Il rettangolo in pixel per un fotogramma grande larghezza x altezza.
+    pub fn in_pixel(&self, larghezza: usize, altezza: usize) -> Riquadro {
+        let x = (self.x.clamp(0.0, 1.0) * larghezza as f32).round() as i32;
+        let y = (self.y.clamp(0.0, 1.0) * altezza as f32).round() as i32;
+        let w = (self.w.clamp(0.0, 1.0) * larghezza as f32).round() as i32;
+        let h = (self.h.clamp(0.0, 1.0) * altezza as f32).round() as i32;
+        Riquadro { x, y, w: w.max(1), h: h.max(1) }
+    }
+}
+
+/// La zona fissa che vale in quel secondo del video (None = nessuna).
+/// Se due zone si sovrappongono vince l'ultima (quella aggiunta dopo).
+/// (Le zone che seguono un oggetto non contano: quelle si aggiungono al display.)
+pub fn zona_fissa_a(zone: &[ZonaFissa], secondi: f64) -> Option<ZonaFissa> {
+    zone.iter().rev().find(|z| !z.segui && secondi >= z.inizio && secondi <= z.fine).copied()
 }
 
 /// Un rettangolo: angolo in alto a sinistra (x, y), larghezza e altezza.
@@ -861,6 +899,29 @@ pub fn copri_grezzo(
         // modalità prova: verde = display trovato, rosso = zona coperta
         disegna_bordo(dati, larghezza, altezza, byte_per_canale, r, [0, 65535, 0]);
         disegna_bordo(dati, larghezza, altezza, byte_per_canale, zona, [65535, 0, 0]);
+        return;
+    }
+    copri_zona_grezzo(dati, larghezza, altezza, byte_per_canale, zona, imp);
+}
+
+/// Copre una zona già decisa (per esempio una zona fissa disegnata a mano).
+pub fn copri_zona(foto: &mut Fotogramma, zona: Riquadro, imp: &Impostazioni) {
+    let (larghezza, altezza) = (foto.larghezza, foto.altezza);
+    copri_zona_grezzo(&mut foto.dati, larghezza, altezza, 1, zona, imp);
+}
+
+/// Copre esattamente la zona data, con lo stile scelto.
+pub fn copri_zona_grezzo(
+    dati: &mut [u8],
+    larghezza: usize,
+    altezza: usize,
+    byte_per_canale: usize,
+    zona: Riquadro,
+    imp: &Impostazioni,
+) {
+    if imp.debug {
+        // modalità prova: blu = zona fissa (o zona già decisa)
+        disegna_bordo(dati, larghezza, altezza, byte_per_canale, zona, [0, 0, 65535]);
         return;
     }
 

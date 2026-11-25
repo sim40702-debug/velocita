@@ -13,7 +13,9 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
-use motore::rilevamento::{ColoreDisplay, Fotogramma, Impostazioni, Momento, Regolazione, Riquadro, Stile};
+use motore::rilevamento::{
+    copri_zona, ColoreDisplay, Fotogramma, Impostazioni, Momento, Regolazione, Riquadro, Stile, ZonaFissa,
+};
 use motore::video::{self, Esito};
 
 // diventa true quando l'utente preme "Interrompi"
@@ -55,6 +57,8 @@ struct SceltaDisplay {
     regolazione: Option<RegolazioneFinestra>,
     /// come coprire: "pixel", "sfocatura", "nero" o "tinta" (manca = pixel)
     stile: Option<String>,
+    /// true = copre anche le facce (manca = no)
+    volti: Option<bool>,
 }
 
 /// La regolazione della zona come arriva dalla finestra.
@@ -66,6 +70,29 @@ struct RegolazioneFinestra {
     altezza: f32,
 }
 
+/// Una zona disegnata a mano per un pezzo del video, come arriva dalla finestra
+/// (secondi e percentuali da 0 a 1).
+#[derive(Deserialize)]
+struct ZonaFissaFinestra {
+    inizio: f64,
+    fine: f64,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    /// true = segue l'oggetto che si muove (manca = zona ferma)
+    segui: Option<bool>,
+}
+
+fn zone_fisse(lista: Option<Vec<ZonaFissaFinestra>>) -> Vec<ZonaFissa> {
+    let mut zone = Vec::new();
+    for z in lista.unwrap_or_default() {
+        let segui = z.segui.unwrap_or(false);
+        zone.push(ZonaFissa { inizio: z.inizio, fine: z.fine, x: z.x, y: z.y, w: z.w, h: z.h, segui });
+    }
+    zone
+}
+
 fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) -> Impostazioni {
     Impostazioni {
         blocco_pixel: forza.clamp(4, 40),
@@ -75,6 +102,7 @@ fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) 
         colore: ColoreDisplay::da_nome(&display.colore, display.rgb),
         ovunque: display.posizione == "ovunque",
         stile: Stile::da_nome(display.stile.as_deref().unwrap_or("pixel")),
+        volti: display.volti.unwrap_or(false),
         regolazione: match &display.regolazione {
             Some(r) => Regolazione { dx: r.dx, dy: r.dy, larghezza: r.larghezza, altezza: r.altezza },
             None => Regolazione::nessuna(),
@@ -127,12 +155,18 @@ struct Zona {
 #[derive(Serialize)]
 struct RispostaAnteprima {
     immagine: String,
+    /// la stessa immagine già coperta (per il bottone "Risultato")
+    risultato: String,
     /// la zona che verrà coperta (con la regolazione)
     zona: Option<Zona>,
     /// la zona automatica, senza regolazione (serve per regolarla)
     zona_base: Option<Zona>,
     /// "giorno" o "notte": quello usato per questo fotogramma
     momento: String,
+    /// true se qui vale una zona disegnata a mano
+    fissa: bool,
+    /// le altre zone coperte: facce e oggetti da seguire
+    altre: Vec<Zona>,
 }
 
 /// Fotogramma -> immagine JPEG per la finestra ("data:image/jpeg;base64,...").
@@ -156,10 +190,12 @@ async fn anteprima_animata(
     forza: u32,
     margine: f32,
     display: SceltaDisplay,
+    fisse: Option<Vec<ZonaFissaFinestra>>,
 ) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let imp = impostazioni(forza, margine, false, &display);
-        let fotogrammi = video::anteprima_animata(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp)?;
+        let zone = zone_fisse(fisse);
+        let fotogrammi = video::anteprima_animata(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp, &zone)?;
         let mut immagini = Vec::new();
         for foto in fotogrammi {
             immagini.push(in_jpeg(foto, 720)?);
@@ -196,6 +232,37 @@ fn espandi_percorsi(percorsi: Vec<String>) -> Vec<String> {
     risultato
 }
 
+/// CARTELLA SORVEGLIATA: i video della cartella che non sono ancora stati coperti.
+/// - si saltano i file appena cambiati (forse si stanno ancora copiando)
+/// - un video è già fatto se nella cartella di uscita c'è "nome_speed_blur..."
+#[tauri::command]
+fn da_fare_in_cartella(cartella: String, uscita: Option<String>) -> Vec<String> {
+    let cartella_uscita = match uscita {
+        Some(u) if !u.is_empty() => PathBuf::from(u),
+        _ => PathBuf::from(&cartella),
+    };
+    // i nomi dei file già finiti (per controllare velocemente)
+    let finiti: Vec<String> = match std::fs::read_dir(&cartella_uscita) {
+        Ok(voci) => voci.filter_map(|v| v.ok()).map(|v| v.file_name().to_string_lossy().to_string()).collect(),
+        Err(_) => Vec::new(),
+    };
+    let mut da_fare = Vec::new();
+    for percorso in espandi_percorsi(vec![cartella]) {
+        let p = Path::new(&percorso);
+        let nome = p.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        let gia_fatto = finiti.iter().any(|f| f.starts_with(&format!("{nome}_speed_blur")));
+        // cambiato negli ultimi 10 secondi: forse si sta ancora copiando
+        let fermo = match std::fs::metadata(p).and_then(|m| m.modified()) {
+            Ok(data) => data.elapsed().map(|t| t.as_secs() >= 10).unwrap_or(false),
+            Err(_) => false,
+        };
+        if !gia_fatto && fermo {
+            da_fare.push(percorso);
+        }
+    }
+    da_fare
+}
+
 fn in_percentuale(r: Riquadro, larghezza: usize, altezza: usize) -> Zona {
     Zona {
         x: r.x as f64 / larghezza as f64,
@@ -212,18 +279,30 @@ async fn anteprima(
     forza: u32,
     margine: f32,
     display: SceltaDisplay,
+    fisse: Option<Vec<ZonaFissaFinestra>>,
 ) -> Result<RispostaAnteprima, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let imp = impostazioni(forza, margine, false, &display);
-        let a = video::anteprima(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp)?;
+        let zone = zone_fisse(fisse);
+        let a = video::anteprima(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp, &zone)?;
         let (larghezza, altezza) = (a.foto.larghezza, a.foto.altezza);
 
+        // una copia coperta, come sarà nel video finito
+        let mut coperta = Fotogramma { larghezza, altezza, dati: a.foto.dati.clone() };
+        if let Some(zona) = a.zona_coperta {
+            copri_zona(&mut coperta, zona, &imp);
+        }
+        for zona in &a.altre {
+            copri_zona(&mut coperta, *zona, &imp);
+        }
+        let altre: Vec<Zona> = a.altre.iter().map(|r| in_percentuale(*r, larghezza, altezza)).collect();
+        let risultato = in_jpeg(coperta, 960)?;
         let immagine = in_jpeg(a.foto, 960)?;
 
         let zona = a.zona_coperta.map(|r| in_percentuale(r, larghezza, altezza));
         let zona_base = a.zona_base.map(|r| in_percentuale(r, larghezza, altezza));
         let momento = if a.momento == Momento::Giorno { "giorno" } else { "notte" };
-        Ok(RispostaAnteprima { immagine, zona, zona_base, momento: momento.to_string() })
+        Ok(RispostaAnteprima { immagine, risultato, zona, zona_base, momento: momento.to_string(), fissa: a.fissa, altre })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -306,6 +385,67 @@ async fn analizza(app: AppHandle, percorso: String, display: SceltaDisplay) -> R
     .map_err(|e| e.to_string())?
 }
 
+// ==========================================
+// TIENI SVEGLIO IL COMPUTER
+// ==========================================
+
+/// Finché esiste, il computer non va in stop (lo schermo invece può spegnersi).
+/// Quando sparisce (alla fine dell'esportazione) tutto torna normale.
+struct Sveglio {
+    // sul Mac: il programma "caffeinate" che tiene sveglio il Mac
+    caffeinate: Option<std::process::Child>,
+}
+
+#[cfg(windows)]
+#[link(name = "kernel32")]
+extern "system" {
+    fn SetThreadExecutionState(stato: u32) -> u32;
+}
+
+impl Sveglio {
+    #[allow(unused_mut)]
+    fn nuovo() -> Sveglio {
+        let mut caffeinate = None;
+        #[cfg(target_os = "macos")]
+        {
+            // -i = niente stop, -w = si ferma da solo se Velocità si chiude
+            let pid = std::process::id().to_string();
+            caffeinate = std::process::Command::new("caffeinate").args(["-i", "-w", &pid]).spawn().ok();
+        }
+        #[cfg(windows)]
+        unsafe {
+            // ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+            SetThreadExecutionState(0x8000_0000 | 0x0000_0001);
+        }
+        Sveglio { caffeinate }
+    }
+}
+
+impl Drop for Sveglio {
+    fn drop(&mut self) {
+        if let Some(figlio) = self.caffeinate.as_mut() {
+            let _ = figlio.kill();
+            let _ = figlio.wait();
+        }
+        #[cfg(windows)]
+        unsafe {
+            SetThreadExecutionState(0x8000_0000); // torna normale
+        }
+    }
+}
+
+/// Il file finito prende la data del file originale
+/// (così in DaVinci e in Foto i video restano in ordine).
+fn copia_data(entrata: &Path, uscita: &Path) {
+    let data = match std::fs::metadata(entrata).and_then(|m| m.modified()) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    if let Ok(file) = std::fs::OpenOptions::new().write(true).open(uscita) {
+        let _ = file.set_modified(data);
+    }
+}
+
 #[derive(Serialize, Clone)]
 struct Avanzamento {
     fatti: u64,
@@ -351,6 +491,7 @@ async fn elabora(
     debug: bool,
     display: SceltaDisplay,
     taglio: Option<[f64; 2]>,
+    fisse: Option<Vec<ZonaFissaFinestra>>,
 ) -> Result<Risultato, String> {
     ANNULLA.store(false, Ordering::Relaxed);
     ferma_analisi(); // il processore serve tutto all'esportazione
@@ -362,7 +503,10 @@ async fn elabora(
         };
         let uscita = nome_uscita(&entrata, &cartella_uscita);
         let imp = impostazioni(forza, margine, debug, &display);
+        let zone = zone_fisse(fisse);
         let inizio = Instant::now();
+        // il computer resta sveglio finché questa funzione non finisce
+        let _sveglio = Sveglio::nuovo();
 
         if video::e_immagine(&entrata) {
             let trovato = video::elabora_foto(&entrata, &uscita, &imp)?;
@@ -370,6 +514,7 @@ async fn elabora(
                 let _ = std::fs::remove_file(&uscita);
                 return Err("Non trovo il display in questa foto.".to_string());
             }
+            copia_data(&entrata, &uscita);
             return Ok(Risultato {
                 uscita: uscita.to_string_lossy().to_string(),
                 interrotto: false,
@@ -388,6 +533,7 @@ async fn elabora(
             worker,
             &ANNULLA,
             taglio.map(|t| (t[0], t[1])),
+            &zone,
             |fatti, totali| {
                 // aggiorna la barra al massimo 10 volte al secondo
                 if ultimo_invio.elapsed().as_millis() < 100 && fatti < totali {
@@ -408,6 +554,9 @@ async fn elabora(
             Esito::Finito { coperti } => (false, coperti > 0),
             Esito::Interrotto => (true, true),
         };
+        if !interrotto {
+            copia_data(&entrata, &uscita);
+        }
         Ok(Risultato {
             uscita: uscita.to_string_lossy().to_string(),
             interrotto,
@@ -444,7 +593,8 @@ fn main() {
             interrompi,
             cpu_totali,
             analizza,
-            espandi_percorsi
+            espandi_percorsi,
+            da_fare_in_cartella
         ])
         .run(tauri::generate_context!())
         .expect("errore all'avvio di Velocità");

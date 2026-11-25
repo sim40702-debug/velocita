@@ -47,6 +47,9 @@ const scelte = {
   posizione: "basso",    // basso, ovunque: dove cercare il display
   controllaAggiornamenti: true,
   pannelloTutti: true,   // la parte "Per tutti i video" del pannello è aperta
+  volti: false,         // copre anche le facce delle persone
+  lingua: "auto",       // "auto" (quella del computer), "it", "en" o "de"
+  cartellaSorvegliata: "", // i video nuovi messi qui si coprono da soli ("" = nessuna)
 };
 
 function caricaScelte() {
@@ -76,6 +79,12 @@ function $(id) {
 
 // mostra una schermata e nasconde le altre
 function mostraSchermata(nome) {
+  if (nome !== "corso") {
+    togliBarraDock();
+  }
+  if (nome !== "pronto" && schermoIntero) {
+    cambiaSchermoIntero();
+  }
   const tutte = ["inizio", "pronto", "corso", "finito", "impostazioni", "scegli"];
   for (const s of tutte) {
     $("schermata-" + s).classList.toggle("nascosto", s !== nome);
@@ -125,11 +134,26 @@ function chiedi(titolo, testo, si, no) {
   });
 }
 
+// come chiedi, ma con una casella per scrivere (es. il nome di un preset).
+// Restituisce il testo scritto, oppure null se annulli.
+async function chiediNome(titolo, testo, si, valore) {
+  const promessa = chiedi(titolo, testo, si, "Annulla");
+  const campo = $("dialogo-campo");
+  campo.value = valore;
+  campo.classList.remove("nascosto");
+  campo.focus();
+  campo.select();
+  const ok = await promessa;
+  const nome = campo.value.trim();
+  return ok && nome !== "" ? nome : null;
+}
+
 function chiudiDialogo(risposta) {
   if (!rispostaDialogo) {
     return;
   }
   $("dialogo").classList.add("nascosto");
+  $("dialogo-campo").classList.add("nascosto");
   const risolvi = rispostaDialogo;
   rispostaDialogo = null;
   risolvi(risposta);
@@ -190,12 +214,12 @@ function testoCoda() {
   const video = coda.filter((f) => !f.foto).length;
   const foto = coda.length - video;
   if (foto === 0) {
-    return video + " video";
+    return t("{n} video", { n: video });
   }
   if (video === 0) {
-    return foto + " foto";
+    return t("{n} foto", { n: foto });
   }
-  return coda.length + " file";
+  return t("{n} file", { n: coda.length });
 }
 
 // codice HTML di un'icona (sono tutte in index.html)
@@ -257,6 +281,7 @@ function sceltaDisplay(file) {
     rgb: scelte.coloreVideo,
     posizione: scelte.posizione,
     stile: scelte.stile,
+    volti: scelte.volti,
   };
 }
 
@@ -282,11 +307,13 @@ const PALLINI_COLORI = {
 // la scritta piccola nell'anteprima, es. "Notte · Arancione"
 function mostraInfoAnteprima(risposta) {
   let testo;
-  if (risposta.zona) {
+  if (risposta.fissa) {
+    testo = "Zona disegnata a mano";
+  } else if (risposta.zona) {
     const momento = risposta.momento === "giorno" ? "Giorno" : "Notte";
-    testo = momento + " · " + NOMI_COLORI[scelte.colore];
+    testo = t(momento) + " · " + t(NOMI_COLORI[scelte.colore]);
     if (scelte.posizione === "ovunque") {
-      testo = testo + " · Ovunque";
+      testo = testo + " · " + t("Ovunque");
     }
   } else {
     testo = "Display non trovato";
@@ -396,6 +423,7 @@ function aggiornaSchedaFile() {
   const tuttiFoto = coda.every((f) => f.foto);
 
   disegnaCoda();
+  disegnaZoneFisse();
 
   // durata totale dei video (o dei pezzi scelti), sopra il bottone Avvia
   let durata = 0;
@@ -406,7 +434,7 @@ function aggiornaSchedaFile() {
   }
   let riepilogo = testoCoda();
   if (durata > 0) {
-    riepilogo += " · " + formattaTempo(durata) + (coda.length > 1 ? " in tutto" : "");
+    riepilogo += " · " + formattaTempo(durata) + (coda.length > 1 ? " " + t("in tutto") : "");
   }
   $("testo-riepilogo").textContent = riepilogo;
   $("barra-sottotitolo").textContent = testoCoda();
@@ -420,7 +448,7 @@ function aggiornaSchedaFile() {
 
   $("nome-cartella").textContent = scelte.cartella ? nomeDaPercorso(scelte.cartella) : "Accanto al video";
   $("btn-reset-cartella").classList.toggle("nascosto", !scelte.cartella);
-  $("btn-avvia").textContent = coda.length > 1 ? "Avvia (" + coda.length + " file)" : "Avvia";
+  $("btn-avvia").textContent = coda.length > 1 ? t("Avvia ({n} file)", { n: coda.length }) : "Avvia";
   $("btn-apri").textContent = tuttiFoto ? "Apri foto" : "Apri video";
 
   // con una foto il cursore dell'anteprima non serve
@@ -434,12 +462,22 @@ function aggiornaPannelloTutti() {
   $("btn-per-tutti").setAttribute("aria-expanded", String(aperto));
   $("gruppo-tutti").classList.toggle("nascosto", !aperto);
   const stili = { pixel: "Pixel", sfocatura: "Sfocato", nero: "Nero", tinta: "Tinta" };
-  let riassunto = stili[scelte.stile];
+  let riassunto = t(stili[scelte.stile]);
   if (scelte.stile === "pixel" || scelte.stile === "sfocatura") {
     riassunto += " " + scelte.forza + " px";
   }
-  riassunto += " · margine " + Math.round(scelte.margine * 100) + "%";
+  riassunto += " · " + t("margine {n}%", { n: Math.round(scelte.margine * 100) });
+  if (scelte.volti) {
+    riassunto += " · " + t("volti");
+  }
   $("riassunto-tutti").textContent = aperto ? "" : riassunto;
+  // il preset uguale alle scelte di adesso si colora
+  const chips = $("lista-preset").querySelectorAll(".chip:not(.aggiungi)");
+  caricaPreset().forEach((preset, i) => {
+    if (chips[i]) {
+      chips[i].classList.toggle("attivo", presetUguale(preset));
+    }
+  });
 }
 
 // lo stato dell'analisi di un file, per la lista: pallino e parole
@@ -449,21 +487,21 @@ function statoFile(file) {
   }
   const c = file.copertura;
   if (!c || !c.finito) {
-    const testo = analisiInCorso === file.percorso ? "Analisi…" : "Da analizzare";
+    const testo = analisiInCorso === file.percorso ? t("Analisi…") : t("Da analizzare");
     return { classe: "attesa", testo: testo };
   }
   if (c.errore) {
-    return { classe: "attesa", testo: "Analisi non riuscita" };
+    return { classe: "attesa", testo: t("Analisi non riuscita") };
   }
   const rossi = trattiNelTaglio(file, 0);
   if (rossi > 0) {
-    return { classe: "rosso", testo: rossi === 1 ? "1 tratto non trovato" : rossi + " tratti non trovati" };
+    return { classe: "rosso", testo: rossi === 1 ? t("1 tratto non trovato") : t("{n} tratti non trovati", { n: rossi }) };
   }
   const arancioni = trattiNelTaglio(file, 1);
   if (arancioni > 0) {
-    return { classe: "ambra", testo: testoTratti(arancioni) + " da controllare" };
+    return { classe: "ambra", testo: arancioni === 1 ? t("1 tratto da controllare") : t("{n} tratti da controllare", { n: arancioni }) };
   }
-  return { classe: "verde", testo: "Tutto coperto" };
+  return { classe: "verde", testo: t("Tutto coperto") };
 }
 
 function disegnaCoda() {
@@ -483,7 +521,7 @@ function disegnaCoda() {
     const stato = statoFile(file);
     if (stato) {
       const testoMeta = riga.querySelector(".meta");
-      testoMeta.textContent = meta + " · " + stato.testo;
+      testoMeta.textContent = t(meta) + " · " + stato.testo;
       testoMeta.insertAdjacentHTML("afterbegin", '<i class="pallino-stato ' + stato.classe + '"></i>');
     }
     if (i === indiceAnteprima) {
@@ -580,14 +618,29 @@ async function caricaAnteprima() {
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
       display: sceltaDisplay(file),
+      fisse: file.zoneFisse || [],
     });
     if (mioNumero !== numeroAnteprima) {
       return; // nel frattempo è stata chiesta un'altra anteprima
     }
     ultimaAnteprima = risposta;
+    // l'ultima zona trovata dal programma: è il punto di partenza per le zone a mano
+    if (risposta.zona && !risposta.fissa) {
+      file.ultimaZona = risposta.zona;
+    }
+    $("anteprima-zona").classList.toggle("fissa", risposta.fissa);
+    altreZone = risposta.altre || [];
     const img = $("anteprima-img");
-    img.onload = () => posizionaZona(img, $("anteprima-zona"), risposta.zona);
-    img.src = risposta.immagine;
+    img.onload = () => {
+      // mentre regoli la zona, la zona giusta è quella che stai spostando
+      if (regolazioneAperta) {
+        aggiornaZonaInModifica();
+      } else {
+        posizionaZona(img, $("anteprima-zona"), risposta.zona);
+      }
+      disegnaAltreZone();
+    };
+    img.src = vista === "risultato" ? risposta.risultato : risposta.immagine;
     mostraInfoAnteprima(risposta);
 
     if (risposta.zona) {
@@ -604,8 +657,250 @@ async function caricaAnteprima() {
   } catch (errore) {
     if (mioNumero === numeroAnteprima) {
       $("anteprima-info").classList.add("nascosto");
-      $("anteprima-carico").textContent = "Anteprima non disponibile: " + errore;
+      $("anteprima-carico").textContent = t("Anteprima non disponibile:") + " " + errore;
     }
+  }
+}
+
+// ==========================================
+// ANTEPRIMA: ORIGINALE / RISULTATO E SCHERMO INTERO
+// ==========================================
+
+// "originale" = il video com'è, "risultato" = già coperto
+let vista = "originale";
+// le altre zone coperte nell'anteprima: facce e oggetti seguiti
+let altreZone = [];
+
+// i riquadri tratteggiati blu per le facce e gli oggetti seguiti
+function disegnaAltreZone() {
+  const contenitore = $("anteprima-altre");
+  contenitore.innerHTML = "";
+  const img = $("anteprima-img");
+  if (!img.naturalWidth) {
+    return;
+  }
+  const g = geometriaImmagine(img);
+  for (const z of altreZone) {
+    const div = document.createElement("div");
+    div.className = "zona-altra";
+    div.style.left = g.sinistra + z.x * g.larghezza + "px";
+    div.style.top = g.sopra + z.y * g.altezza + "px";
+    div.style.width = z.w * g.larghezza + "px";
+    div.style.height = z.h * g.altezza + "px";
+    contenitore.appendChild(div);
+  }
+}
+let schermoIntero = false;
+
+function cambiaVista(nuova) {
+  vista = nuova;
+  aggiornaSegmentato("scelta-vista", vista);
+  $("anteprima").classList.toggle("vista-risultato", vista === "risultato");
+  if (ultimaAnteprima) {
+    $("anteprima-img").src = vista === "risultato" ? ultimaAnteprima.risultato : ultimaAnteprima.immagine;
+  }
+}
+
+// F o il bottone in alto a destra: l'anteprima riempie la finestra
+function cambiaSchermoIntero() {
+  schermoIntero = !schermoIntero;
+  $("anteprima").classList.toggle("schermo-intero", schermoIntero);
+  $("btn-schermo").querySelector("use").setAttribute("href", schermoIntero ? "#i-riduci" : "#i-schermo");
+  $("btn-schermo").title = schermoIntero ? "Esci dallo schermo intero (Esc)" : "Schermo intero (F)";
+}
+
+// ==========================================
+// PRESET: IMPOSTAZIONI SALVATE CON UN NOME
+// ==========================================
+
+// le scelte che un preset si ricorda
+const SCELTE_PRESET = ["stile", "forza", "margine", "margineManuale", "volti", "momento", "colore", "coloreVideo", "posizione"];
+
+function caricaPreset() {
+  try {
+    return JSON.parse(localStorage.getItem("preset") || "[]");
+  } catch (e) {
+    return [];
+  }
+}
+
+function salvaPreset(lista) {
+  try {
+    localStorage.setItem("preset", JSON.stringify(lista));
+  } catch (e) {
+    // senza memoria i preset durano fino alla chiusura
+  }
+}
+
+// true se le scelte di adesso sono uguali a quelle del preset
+function presetUguale(preset) {
+  return SCELTE_PRESET.every((nome) => JSON.stringify(preset.valori[nome]) === JSON.stringify(scelte[nome]));
+}
+
+function disegnaPreset() {
+  const lista = $("lista-preset");
+  lista.innerHTML = "";
+  caricaPreset().forEach((preset, i) => {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (presetUguale(preset) ? " attivo" : "");
+    chip.title = "Usa queste impostazioni";
+    chip.textContent = preset.nome;
+    chip.addEventListener("click", () => usaPreset(preset));
+    // la × per toglierlo
+    const togli = document.createElement("span");
+    togli.className = "togli-preset";
+    togli.textContent = "×";
+    togli.title = "Elimina";
+    togli.addEventListener("click", (evento) => {
+      evento.stopPropagation();
+      eliminaPreset(i);
+    });
+    chip.appendChild(togli);
+    lista.appendChild(chip);
+  });
+  const aggiungi = document.createElement("button");
+  aggiungi.className = "chip aggiungi";
+  aggiungi.textContent = "+ Salva";
+  aggiungi.title = "Salva stile, forza, margine e display con un nome";
+  aggiungi.addEventListener("click", nuovoPreset);
+  lista.appendChild(aggiungi);
+}
+
+async function nuovoPreset() {
+  const nome = await chiediNome("Salva preset", "Stile, forza, margine e impostazioni del display vengono salvati con questo nome.", "Salva", "");
+  if (!nome) {
+    return;
+  }
+  const valori = {};
+  for (const n of SCELTE_PRESET) {
+    valori[n] = scelte[n];
+  }
+  // con lo stesso nome si sostituisce quello vecchio
+  const lista = caricaPreset().filter((p) => p.nome !== nome);
+  lista.push({ nome: nome, valori: valori });
+  salvaPreset(lista);
+  disegnaPreset();
+}
+
+async function eliminaPreset(indice) {
+  const lista = caricaPreset();
+  const si = await chiedi(t("Eliminare «{nome}»?", { nome: lista[indice].nome }), "Le impostazioni di adesso non cambiano.", "Elimina", "Annulla");
+  if (!si) {
+    return;
+  }
+  lista.splice(indice, 1);
+  salvaPreset(lista);
+  disegnaPreset();
+}
+
+function usaPreset(preset) {
+  const primaAnalisi = sceltePerAnalisi();
+  Object.assign(scelte, preset.valori);
+  salvaScelte();
+  mettiScelteNeiControlli();
+  // se cambia il modo di cercare il display, le strisce vanno rifatte
+  if (sceltePerAnalisi() !== primaAnalisi) {
+    for (const f of coda) {
+      f.copertura = null;
+    }
+    analisiInCorso = "";
+    analizzaSeServe();
+    aggiornaSchedaFile();
+  }
+  caricaAnteprima();
+}
+
+// ==========================================
+// CARTELLA SORVEGLIATA
+// ==========================================
+
+// i file già provati (anche quelli andati male): non si riprovano
+const giaProvati = new Set();
+
+async function scegliSorvegliata() {
+  const cartella = await tauri.dialog.open({ directory: true });
+  if (cartella) {
+    scelte.cartellaSorvegliata = cartella;
+    salvaScelte();
+    aggiornaSorvegliata();
+  }
+}
+
+function togliSorvegliata() {
+  scelte.cartellaSorvegliata = "";
+  salvaScelte();
+  aggiornaSorvegliata();
+}
+
+function aggiornaSorvegliata() {
+  const c = scelte.cartellaSorvegliata;
+  $("nome-sorvegliata").textContent = c ? nomeDaPercorso(c) : "Nessuna";
+  $("nome-sorvegliata").title = c;
+  $("btn-togli-sorvegliata").classList.toggle("nascosto", !c);
+}
+
+// ogni 10 secondi: ci sono video nuovi da coprire?
+// Si parte da soli solo quando l'app è ferma sulla schermata iniziale o
+// finale: se stai lavorando su una coda, si aspetta che tu abbia finito.
+async function controllaSorvegliata() {
+  if (!scelte.cartellaSorvegliata || alLavoro || rispostaDialogo || regolazioneAperta) {
+    return;
+  }
+  if (!suSchermata("inizio") && !suSchermata("finito")) {
+    return;
+  }
+  let nuovi;
+  try {
+    nuovi = await invoke("da_fare_in_cartella", { cartella: scelte.cartellaSorvegliata, uscita: scelte.cartella || null });
+  } catch (e) {
+    return; // cartella sparita o scollegata: si riprova dopo
+  }
+  nuovi = nuovi.filter((p) => !giaProvati.has(p));
+  if (nuovi.length === 0 || alLavoro) {
+    return;
+  }
+  for (const p of nuovi) {
+    giaProvati.add(p);
+  }
+  if (nuovi.length === 1) {
+    scriviRegistro(t("Cartella sorvegliata: 1 video nuovo"));
+  } else {
+    scriviRegistro(t("Cartella sorvegliata: {n} video nuovi", { n: nuovi.length }));
+  }
+  await aggiungiFile(nuovi);
+  if (coda.length > 0 && suSchermata("pronto")) {
+    avvia(true); // true = senza domande: lavora da solo
+  }
+}
+
+// ==========================================
+// BARRA SULL'ICONA (Dock del Mac, barra di Windows)
+// ==========================================
+
+let valoreDock = -1;
+
+function barraDock(percentuale) {
+  const valore = Math.round(percentuale);
+  if (valore === valoreDock) {
+    return; // uguale a prima: niente da fare
+  }
+  valoreDock = valore;
+  try {
+    tauri.window.getCurrentWindow().setProgressBar({ status: "normal", progress: valore }).catch(() => {});
+  } catch (e) {
+    // non importa
+  }
+}
+
+function togliBarraDock() {
+  if (valoreDock === -1) {
+    return;
+  }
+  valoreDock = -1;
+  try {
+    tauri.window.getCurrentWindow().setProgressBar({ status: "none" }).catch(() => {});
+  } catch (e) {
+    // non importa
   }
 }
 
@@ -615,21 +910,26 @@ async function caricaAnteprima() {
 
 let fileInCorso = 0;
 
-async function avvia() {
+// automatico = true: è partito da solo (cartella sorvegliata), senza domande
+async function avvia(automatico) {
   if (alLavoro || coda.length === 0 || rispostaDialogo) {
     return;
   }
   // prima di partire: ci sono punti dove il numero resterebbe visibile?
   const conRossi = coda.filter((f) => !f.foto && f.copertura && f.copertura.finito && trattiNelTaglio(f, 0) > 0);
-  if (conRossi.length > 0) {
+  if (conRossi.length > 0 && automatico !== true) {
     let testo;
     if (conRossi.length === 1) {
       const n = trattiNelTaglio(conRossi[0], 0);
-      testo = "In «" + conRossi[0].nome + "» " + (n === 1 ? "c'è 1 tratto rosso" : "ci sono " + n + " tratti rossi") + ": lì il display non viene trovato e la velocità resterebbe visibile.";
+      if (n === 1) {
+        testo = t("In «{nome}» c'è 1 tratto rosso: lì il display non viene trovato e la velocità resterebbe visibile.", { nome: conRossi[0].nome });
+      } else {
+        testo = t("In «{nome}» ci sono {n} tratti rossi: lì il display non viene trovato e la velocità resterebbe visibile.", { nome: conRossi[0].nome, n: n });
+      }
     } else {
-      testo = "In " + conRossi.length + " video ci sono tratti rossi: lì il display non viene trovato e la velocità resterebbe visibile.";
+      testo = t("In {n} video ci sono tratti rossi: lì il display non viene trovato e la velocità resterebbe visibile.", { n: conRossi.length });
     }
-    testo += "\n\nPuoi controllarli e regolare la zona, oppure esportare lo stesso.";
+    testo += "\n\n" + t("Puoi controllarli e regolare la zona, oppure esportare lo stesso.");
     const controlla = await chiedi("Alcuni punti non sono coperti", testo, "Controlla", "Esporta lo stesso");
     if (controlla === null) {
       return; // Esc: non fa niente
@@ -652,7 +952,7 @@ async function avvia() {
     fileInCorso = i;
     const file = coda[i];
     preparaSchermataCorso(file, i);
-    scriviRegistro("Inizio: " + file.nome);
+    scriviRegistro(t("Inizio:") + " " + file.nome);
 
     try {
       const risultato = await invoke("elabora", {
@@ -664,6 +964,7 @@ async function avvia() {
         debug: $("interruttore-prova").checked,
         display: sceltaDisplay(file),
         taglio: file.taglio ? [file.taglio.inizio, file.taglio.fine] : null,
+        fisse: file.zoneFisse || [],
       });
 
       if (risultato.interrotto) {
@@ -674,13 +975,13 @@ async function avvia() {
       // quanti tratti rossi c'erano (per dire «controlla» nel rapporto)
       const rossi = file.copertura && file.copertura.finito ? trattiNelTaglio(file, 0) : 0;
       ultimiRisultati.push({ file: file, nome: file.nome, foto: file.foto, uscita: risultato.uscita, trovato: risultato.trovato, rossi: rossi, errore: null, secondi: risultato.secondi });
-      scriviRegistro("Salvato: " + risultato.uscita + " (" + formattaTempo(risultato.secondi) + ")");
+      scriviRegistro(t("Salvato:") + " " + risultato.uscita + " (" + formattaTempo(risultato.secondi) + ")");
       if (!risultato.trovato) {
-        scriviRegistro("Attenzione: display mai trovato in " + file.nome);
+        scriviRegistro(t("Attenzione: display mai trovato in {nome}", { nome: file.nome }));
       }
     } catch (errore) {
       ultimiRisultati.push({ file: file, nome: file.nome, foto: file.foto, uscita: null, trovato: false, rossi: 0, errore: String(errore) });
-      scriviRegistro("Errore con " + file.nome + ": " + errore);
+      scriviRegistro(t("Errore con {nome}:", { nome: file.nome }) + " " + errore);
     }
   }
 
@@ -714,7 +1015,7 @@ function disegnaCodaCorso(indiceCorrente) {
         meta = "Display non trovato";
         stato = '<span class="segno attenzione">' + icona("attenzione") + "</span>";
       } else {
-        meta = r && r.secondi ? "Fatto in " + formattaTempo(r.secondi) : "Fatto";
+        meta = r && r.secondi ? t("Fatto in {tempo}", { tempo: formattaTempo(r.secondi) }) : "Fatto";
         stato = '<span class="segno ok">' + icona("spunta") + "</span>";
       }
     } else if (i === indiceCorrente) {
@@ -740,7 +1041,7 @@ function preparaSchermataCorso(file, indice) {
   $("corso-fotogrammi").textContent = "Avvio…";
   $("corso-mancano").textContent = "";
   $("corso-sottotitolo").textContent =
-    coda.length > 1 ? "File " + (indice + 1) + " di " + coda.length : "Sto lavorando…";
+    coda.length > 1 ? t("File {n} di {totale}", { n: indice + 1, totale: coda.length }) : "Sto lavorando…";
   $("btn-interrompi").disabled = false;
   $("btn-interrompi").textContent = "Interrompi";
 
@@ -776,15 +1077,19 @@ tauri.event.listen("avanzamento", (evento) => {
   const percentuale = a.totali > 0 ? Math.min(100, Math.floor((a.fatti / a.totali) * 100)) : 0;
   $("barra-piena").style.width = percentuale + "%";
   $("corso-percentuale").textContent = percentuale + "%";
-  $("corso-fotogrammi").textContent = "Fotogramma " + formattaNumero(a.fatti) + " di " + formattaNumero(a.totali);
+  // sull'icona: quanto manca a tutta la coda, non solo a questo file
+  if (a.totali > 0 && coda.length > 0) {
+    barraDock(((fileInCorso + a.fatti / a.totali) / coda.length) * 100);
+  }
+  $("corso-fotogrammi").textContent = t("Fotogramma {n} di {totale}", { n: formattaNumero(a.fatti), totale: formattaNumero(a.totali) });
   // la riga del file in corso, a destra
   if ($("riga-percentuale")) {
     $("riga-percentuale").textContent = percentuale + "%";
     $("riga-barra").style.width = percentuale + "%";
-    $("riga-fotogrammi").textContent = formattaNumero(a.fatti) + " di " + formattaNumero(a.totali) + " fotogrammi";
+    $("riga-fotogrammi").textContent = t("{n} di {totale} fotogrammi", { n: formattaNumero(a.fatti), totale: formattaNumero(a.totali) });
   }
   if (a.fatti > 30 && a.fatti < a.totali) {
-    $("corso-mancano").textContent = "Mancano circa " + formattaTempo(a.secondi_mancanti);
+    $("corso-mancano").textContent = t("Mancano circa {tempo}", { tempo: formattaTempo(a.secondi_mancanti) });
   } else if (a.fatti >= a.totali) {
     $("corso-mancano").textContent = "Salvo il video…";
   }
@@ -832,32 +1137,34 @@ function mostraFinito(secondi) {
     $("esito-titolo").textContent = "Fatto, ma controlla";
     const pezzi = [];
     if (nonTrovati.length > 0) {
-      pezzi.push("In " + nonTrovati.map((r) => r.nome).join(", ") + " non ho trovato il display.");
+      pezzi.push(t("In {nomi} non ho trovato il display.", { nomi: nonTrovati.map((r) => r.nome).join(", ") }));
     }
     if (conRossi.length > 0) {
-      pezzi.push("In " + conRossi.map((r) => r.nome).join(", ") + " alcuni tratti non sono coperti.");
+      pezzi.push(t("In {nomi} alcuni tratti non sono coperti.", { nomi: conRossi.map((r) => r.nome).join(", ") }));
     }
     if (sbagliati.length > 0) {
       if (sbagliati.length === 1) {
-        pezzi.push("1 file non è stato elaborato (il motivo è qui sotto).");
+        pezzi.push(t("1 file non è stato elaborato (il motivo è qui sotto)."));
       } else {
-        pezzi.push(sbagliati.length + " file non sono stati elaborati (il motivo è qui sotto).");
+        pezzi.push(t("{n} file non sono stati elaborati (il motivo è qui sotto).", { n: sbagliati.length }));
       }
     }
-    pezzi.push("Con «Correggi» torni al video e lo sistemi.");
+    pezzi.push(t("Con «Correggi» torni al video e lo sistemi."));
     $("esito-testo").textContent = pezzi.join(" ");
   } else {
     iconaEsito.className = "esito-icona ok";
     iconaEsito.innerHTML = icona("spunta");
     $("esito-titolo").textContent = "Fatto";
     if (riusciti.length === 1) {
-      const dove = scelte.cartella ? "nella cartella scelta." : "accanto all'originale.";
-      $("esito-testo").textContent = nomeDaPercorso(riusciti[0].uscita) + " è " + dove;
+      const nome = nomeDaPercorso(riusciti[0].uscita);
+      $("esito-testo").textContent = scelte.cartella
+        ? t("{nome} è nella cartella scelta.", { nome: nome })
+        : t("{nome} è accanto all'originale.", { nome: nome });
     } else {
-      $("esito-testo").textContent = riusciti.length + " file pronti.";
+      $("esito-testo").textContent = t("{n} file pronti.", { n: riusciti.length });
     }
   }
-  $("esito-tempo").textContent = "Tempo impiegato: " + formattaTempo(secondi);
+  $("esito-tempo").textContent = t("Tempo impiegato: {tempo}", { tempo: formattaTempo(secondi) });
 
   $("btn-apri").classList.toggle("nascosto", riusciti.length !== 1);
   $("btn-mostra").classList.toggle("nascosto", riusciti.length === 0);
@@ -888,7 +1195,7 @@ function disegnaRisultati() {
       stato = '<span class="segno attenzione" title="Da controllare">' + icona("attenzione") + "</span>";
       correggi = true;
     } else if (r.rossi > 0) {
-      meta = (r.rossi === 1 ? "1 tratto non coperto" : r.rossi + " tratti non coperti");
+      meta = r.rossi === 1 ? t("1 tratto non coperto") : t("{n} tratti non coperti", { n: r.rossi });
       stato = '<span class="segno attenzione" title="Da controllare">' + icona("attenzione") + "</span>";
       correggi = true;
     }
@@ -1013,13 +1320,13 @@ async function controllaAggiornamenti(manuale) {
   try {
     aggiornamento = await tauri.updater.check();
     if (aggiornamento) {
-      $("avviso-titolo").textContent = "È disponibile la versione " + aggiornamento.version;
+      $("avviso-titolo").textContent = t("È disponibile la versione {versione}", { versione: aggiornamento.version });
       // prima riga delle note della release
       const note = (aggiornamento.body || "").split("\n").find((r) => r.trim() !== "") || "";
       $("avviso-note").textContent = note.replace(/^[#*\-\s]+/, "");
       $("avviso").classList.remove("nascosto");
       if (manuale) {
-        $("btn-controlla").textContent = "Disponibile la " + aggiornamento.version;
+        $("btn-controlla").textContent = t("Disponibile la {versione}", { versione: aggiornamento.version });
         mostraSchermata(coda.length > 0 ? "pronto" : "inizio");
       }
     } else if (manuale) {
@@ -1060,7 +1367,7 @@ async function installaAggiornamento() {
   } catch (errore) {
     bottone.disabled = false;
     bottone.textContent = "Riprova";
-    $("avviso-note").textContent = "Aggiornamento non riuscito: " + errore;
+    $("avviso-note").textContent = t("Aggiornamento non riuscito:") + " " + errore;
   }
 }
 
@@ -1119,7 +1426,8 @@ function chiudiImpostazioni() {
 // ==========================================
 
 // colore di ogni stato: 0 non trovato, 1 da controllare, 2 coperto
-const COLORI_STRISCIA = ["--rosso", "--ambra", "--verde"];
+// 3 = coperto con una zona disegnata a mano
+const COLORI_STRISCIA = ["--rosso", "--ambra", "--verde", "--blu"];
 // il video che si sta analizzando adesso ("" = nessuno)
 let analisiInCorso = "";
 
@@ -1213,16 +1521,43 @@ function dentroTaglio(file, i) {
   return secondi >= file.taglio.inizio && secondi <= file.taglio.fine;
 }
 
+// la zona a mano che vale in quel secondo (null = nessuna).
+// Come nel motore: se due si sovrappongono vince l'ultima aggiunta.
+function zonaFissaA(file, secondi) {
+  const zone = file.zoneFisse || [];
+  for (let i = zone.length - 1; i >= 0; i--) {
+    if (!zone[i].segui && secondi >= zone[i].inizio && secondi <= zone[i].fine) {
+      return zone[i];
+    }
+  }
+  return null;
+}
+
+// gli stati della striscia, con le zone a mano: dove c'è una zona
+// disegnata a mano il punto diventa 3 (coperto a mano)
+function statiEffettivi(file) {
+  const c = file.copertura;
+  if (!c) {
+    return [];
+  }
+  const totale = Math.max(c.totali, c.stati.length);
+  return c.stati.map((stato, i) => {
+    const meta = ((i + 0.5) / totale) * file.durata; // il secondo a metà del punto
+    return zonaFissaA(file, meta) ? 3 : stato;
+  });
+}
+
 // come contaTratti, ma conta solo quelli dentro il pezzo da salvare
 function trattiNelTaglio(file, stato) {
   const c = file.copertura;
   if (!c) {
     return 0;
   }
+  const stati = statiEffettivi(file);
   let tratti = 0;
   let primaDentro = false;
-  for (let i = 0; i < c.stati.length; i++) {
-    const dentro = c.stati[i] === stato && dentroTaglio(file, i);
+  for (let i = 0; i < stati.length; i++) {
+    const dentro = stati[i] === stato && dentroTaglio(file, i);
     if (dentro && !primaDentro) {
       tratti++;
     }
@@ -1239,10 +1574,11 @@ function iniziTratti(file, soloStato) {
     return lista;
   }
   const totale = Math.max(c.totali, c.stati.length);
-  for (let i = 0; i < c.stati.length; i++) {
-    const stato = c.stati[i];
-    const problema = soloStato === undefined ? stato !== 2 : stato === soloStato;
-    if (problema && (i === 0 || c.stati[i - 1] !== stato) && dentroTaglio(file, i)) {
+  const stati = statiEffettivi(file);
+  for (let i = 0; i < stati.length; i++) {
+    const stato = stati[i];
+    const problema = soloStato === undefined ? stato < 2 : stato === soloStato;
+    if (problema && (i === 0 || stati[i - 1] !== stato) && dentroTaglio(file, i)) {
       lista.push((i + 0.5) / totale);
     }
   }
@@ -1304,7 +1640,7 @@ function vaiAlProblema(file) {
 
 // "1 tratto", "3 tratti"
 function testoTratti(numero) {
-  return numero === 1 ? "1 tratto" : numero + " tratti";
+  return numero === 1 ? t("1 tratto") : t("{n} tratti", { n: numero });
 }
 
 function disegnaStriscia() {
@@ -1337,13 +1673,14 @@ function disegnaStriscia() {
     return;
   }
   const passo = larghezza / Math.max(c.totali, c.stati.length);
-  c.stati.forEach((stato, i) => {
+  const stati = statiEffettivi(file);
+  stati.forEach((stato, i) => {
     ctx.fillStyle = coloreCss(COLORI_STRISCIA[stato]);
     ctx.fillRect(i * passo, 0, passo + 0.5, altezza);
   });
   // non solo colori (per chi non distingue bene rosso, arancione e verde):
   // arancione = righe oblique, rosso = a trattini
-  disegnaMotivi(ctx, c.stati, passo, altezza);
+  disegnaMotivi(ctx, stati, passo, altezza);
   // con un taglio, la parte che non viene salvata è più chiara
   if (file.taglio && file.durata > 0) {
     ctx.fillStyle = coloreCss("--sfondo");
@@ -1359,12 +1696,12 @@ function disegnaStriscia() {
   // la scritta sotto
   const legenda = $("legenda");
   if (c.errore) {
-    legenda.textContent = "Analisi non riuscita: " + c.errore;
+    legenda.textContent = t("Analisi non riuscita:") + " " + c.errore;
     return;
   }
   if (!c.finito) {
     const percentuale = Math.floor((c.stati.length / Math.max(1, c.totali)) * 100);
-    legenda.textContent = "Analisi del video… " + percentuale + "%";
+    legenda.textContent = t("Analisi del video… {n}%", { n: percentuale });
     return;
   }
   // si contano solo i tratti dentro il pezzo da salvare
@@ -1376,22 +1713,36 @@ function disegnaStriscia() {
   } else {
     pezzi.push('<span><i style="background:var(--verde)"></i><b class="simbolo">✓</b>Coperto</span>');
     if (incerti > 0) {
-      pezzi.push('<span><i class="ambra"></i><b class="simbolo">!</b>Da controllare · ' + testoTratti(incerti) + "</span>");
+      pezzi.push('<span><i class="ambra"></i><b class="simbolo">!</b>' + t("Da controllare") + " · " + testoTratti(incerti) + "</span>");
     }
     if (mancanti > 0) {
-      pezzi.push('<span><i class="rosso"></i><b class="simbolo">✕</b>Non trovato · ' + testoTratti(mancanti) + "</span>");
+      pezzi.push('<span><i class="rosso"></i><b class="simbolo">✕</b>' + t("Non trovato") + " · " + testoTratti(mancanti) + "</span>");
     }
     pezzi.push("<span>Clicca sulla striscia o usa le frecce per andarci</span>");
   }
+  const aMano = (file.zoneFisse || []).filter((z) => !z.segui).length;
+  const seguiti = (file.zoneFisse || []).length - aMano;
+  if (aMano > 0) {
+    pezzi.push('<span><i style="background:var(--blu)"></i><b class="simbolo">✎</b>' + t("A mano") + " · " + (aMano === 1 ? t("1 zona") : t("{n} zone", { n: aMano })) + "</span>");
+  }
+  if (seguiti > 0) {
+    pezzi.push('<span><b class="simbolo">↝</b>' + t("Segue") + " · " + (seguiti === 1 ? t("1 oggetto") : t("{n} oggetti", { n: seguiti })) + "</span>");
+  }
+  if (mancanti > 0) {
+    pezzi.push('<button id="btn-legenda-fissa" class="link">Copri a mano un tratto rosso</button>');
+  }
   legenda.innerHTML = pezzi.join("");
+  if ($("btn-legenda-fissa")) {
+    $("btn-legenda-fissa").addEventListener("click", copriPrimoRosso);
+  }
 }
 
 // righe oblique sui tratti arancioni, trattini sui tratti rossi
 function disegnaMotivi(ctx, stati, passo, altezza) {
   ctx.save();
   stati.forEach((stato, i) => {
-    if (stato === 2) {
-      return;
+    if (stato >= 2) {
+      return; // verde e blu: niente disegno
     }
     ctx.save();
     ctx.beginPath();
@@ -1442,6 +1793,193 @@ function cliccaStriscia(evento) {
 }
 
 // ==========================================
+// ZONE A MANO (per i tratti dove il display non si trova)
+// ==========================================
+
+// quando si disegna una zona a mano: quale si modifica (-1 = una nuova)
+// e da che secondo a che secondo vale
+let fissaInModifica = null;
+
+// il tratto rosso o arancione attorno a quel secondo, con mezzo secondo in più
+// per parte. Se lì è tutto verde: 2 secondi prima e dopo.
+function trattoAttorno(file, secondi) {
+  const c = file.copertura;
+  const durata = file.durata;
+  if (c && c.stati.length > 0) {
+    const totale = Math.max(c.totali, c.stati.length);
+    const i = Math.min(c.stati.length - 1, Math.floor((secondi / durata) * totale));
+    const stato = c.stati[i];
+    if (stato < 2) {
+      let primo = i;
+      let ultimo = i;
+      while (primo > 0 && c.stati[primo - 1] === stato) primo--;
+      while (ultimo < c.stati.length - 1 && c.stati[ultimo + 1] === stato) ultimo++;
+      return {
+        inizio: Math.max(0, (primo / totale) * durata - 0.5),
+        fine: Math.min(durata, ((ultimo + 1) / totale) * durata + 0.5),
+      };
+    }
+  }
+  return { inizio: Math.max(0, secondi - 2), fine: Math.min(durata, secondi + 2) };
+}
+
+// apre il disegno di una zona a mano: indice = quella da modificare, -1 = nuova
+function apriZonaFissa(indice) {
+  const file = coda[indiceAnteprima];
+  if (!file || file.foto || regolazioneAperta || !ultimaAnteprima) {
+    return;
+  }
+  if (vista === "risultato") {
+    cambiaVista("originale");
+  }
+  file.zoneFisse = file.zoneFisse || [];
+  let zona;
+  let tempi;
+  if (indice >= 0) {
+    const z = file.zoneFisse[indice];
+    zona = { x: z.x, y: z.y, w: z.w, h: z.h };
+    tempi = { inizio: z.inizio, fine: z.fine };
+  } else {
+    // si parte dalla zona di adesso, o dall'ultima trovata, o dal centro in basso
+    zona = ultimaAnteprima.zona || file.ultimaZona || { x: 0.4, y: 0.62, w: 0.2, h: 0.12 };
+    tempi = trattoAttorno(file, secondiCursore(file));
+  }
+  const segui = indice >= 0 ? file.zoneFisse[indice].segui === true : false;
+  fissaInModifica = { indice: indice, inizio: tempi.inizio, fine: tempi.fine, segui: segui };
+  aggiornaSegmentato("scelta-segui", segui ? "segue" : "ferma");
+
+  fermaAnimazione();
+  regolazioneAperta = true;
+  zonaInModifica = Object.assign({}, zona);
+  $("schermata-pronto").classList.add("regolazione-aperta");
+  $("barra-regola").classList.add("modo-fissa");
+  $("barra-regola").classList.remove("nascosto");
+  $("btn-fissa-elimina").classList.toggle("nascosto", indice < 0);
+  $("anteprima-zona").classList.add("fissa"); // la zona a mano è blu
+  $("anteprima-carico").classList.add("nascosto"); // "Qui non trovo il display" coprirebbe la zona
+  aggiornaTempiFissa();
+  aggiornaZonaInModifica();
+  ingrandisciSullaZona();
+}
+
+// "Ferma" o "Segue": con "Segue" la zona parte da questo fotogramma
+// (dove l'hai disegnata) e va dietro all'oggetto finché lo vede
+function cambiaSegui(valore) {
+  const file = coda[indiceAnteprima];
+  const f = fissaInModifica;
+  f.segui = valore === "segue";
+  aggiornaSegmentato("scelta-segui", valore);
+  if (f.segui) {
+    f.inizio = secondiCursore(file);
+    f.fine = Math.min(file.durata, f.inizio + 60);
+  } else {
+    const tempi = trattoAttorno(file, secondiCursore(file));
+    f.inizio = tempi.inizio;
+    f.fine = tempi.fine;
+  }
+  aggiornaTempiFissa();
+}
+
+// "Dal 0:25 al 0:30" nella barra
+function aggiornaTempiFissa() {
+  $("fissa-inizio").textContent = formattaTempo(fissaInModifica.inizio);
+  $("fissa-fine").textContent = formattaTempo(fissaInModifica.fine);
+}
+
+// i bottoni ‹ › accanto ai tempi: mezzo secondo prima o dopo
+function cambiaTempoFissa(quale, passo) {
+  const file = coda[indiceAnteprima];
+  const f = fissaInModifica;
+  if (quale === "inizio") {
+    f.inizio = Math.min(f.fine - 0.5, Math.max(0, f.inizio + passo));
+  } else {
+    f.fine = Math.max(f.inizio + 0.5, Math.min(file.durata, f.fine + passo));
+  }
+  aggiornaTempiFissa();
+}
+
+function confermaZonaFissa() {
+  const file = coda[indiceAnteprima];
+  const f = fissaInModifica;
+  const z = zonaInModifica;
+  const nuova = { inizio: f.inizio, fine: f.fine, x: z.x, y: z.y, w: z.w, h: z.h, segui: f.segui };
+  if (f.indice >= 0) {
+    file.zoneFisse[f.indice] = nuova;
+  } else {
+    file.zoneFisse.push(nuova);
+  }
+  chiudiRegolazione();
+  dopoZoneFisse();
+}
+
+function eliminaZonaFissa(indice) {
+  const file = coda[indiceAnteprima];
+  file.zoneFisse.splice(indice, 1);
+  if (regolazioneAperta) {
+    chiudiRegolazione();
+  }
+  dopoZoneFisse();
+}
+
+// dopo ogni cambio: lista, striscia, pallini della coda e anteprima
+function dopoZoneFisse() {
+  disegnaZoneFisse();
+  disegnaStriscia();
+  disegnaCodaSeFerma();
+  caricaAnteprima();
+}
+
+// l'elenco delle zone a mano nel pannello
+function disegnaZoneFisse() {
+  const file = coda[indiceAnteprima];
+  const lista = $("lista-fisse");
+  lista.innerHTML = "";
+  const zone = file && !file.foto ? file.zoneFisse || [] : [];
+  $("riga-fisse").classList.toggle("nascosto", !file || file.foto);
+  $("testo-fisse").textContent = zone.length === 0 ? "Nessuna" : zone.length === 1 ? t("1 zona") : t("{n} zone", { n: zone.length });
+  zone.forEach((z, i) => {
+    const riga = document.createElement("div");
+    riga.className = "riga-fissa";
+    const tempi = document.createElement("button");
+    tempi.className = "link";
+    tempi.textContent = formattaTempo(z.inizio) + " – " + formattaTempo(z.fine);
+    tempi.title = "Vai e modifica";
+    // "segue": parte dal punto dove l'hai disegnata
+    const punto = z.segui ? z.inizio : (z.inizio + z.fine) / 2;
+    tempi.addEventListener("click", () => {
+      vaiAlPunto(punto / file.durata);
+      apriZonaFissa(i);
+    });
+    const togli = document.createElement("button");
+    togli.className = "bottone-icona piccolo";
+    togli.title = "Elimina";
+    togli.setAttribute("aria-label", t("Elimina") + " " + formattaTempo(z.inizio));
+    togli.innerHTML = icona("x");
+    togli.addEventListener("click", () => eliminaZonaFissa(i));
+    const tipo = document.createElement("span");
+    tipo.className = "tipo-fissa";
+    tipo.textContent = z.segui ? t("segue") : t("ferma");
+    tempi.appendChild(tipo);
+    riga.appendChild(tempi);
+    riga.appendChild(togli);
+    lista.appendChild(riga);
+  });
+}
+
+// "Copri a mano un tratto rosso": va sul primo e apre il disegno
+function copriPrimoRosso() {
+  const file = coda[indiceAnteprima];
+  const rossi = iniziTratti(file, 0);
+  if (rossi.length === 0) {
+    return;
+  }
+  $("cursore-anteprima").value = Math.round(rossi[0] * 1000);
+  aggiornaTempoCursore();
+  // la zona di partenza: l'ultima trovata dal programma in questo video
+  caricaAnteprima().then(() => apriZonaFissa(-1));
+}
+
+// ==========================================
 // COPERTURA: STILE E MARGINE
 // ==========================================
 
@@ -1453,9 +1991,9 @@ function aggiornaCopertura() {
   $("riga-forza").classList.toggle("nascosto", !conForza);
   let nota = "Con «Guarda 3 s» vedi il risultato.";
   if (scelte.stile === "pixel") {
-    nota = "Più forza = quadrati più grandi. " + nota;
+    nota = t("Più forza = quadrati più grandi.") + " " + t(nota);
   } else if (scelte.stile === "sfocatura") {
-    nota = "Più forza = più sfocato. " + nota;
+    nota = t("Più forza = più sfocato.") + " " + t(nota);
   }
   $("nota-copertura").textContent = nota;
 
@@ -1572,6 +2110,7 @@ async function avviaAnimazione() {
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
       display: sceltaDisplay(file),
+      fisse: file.zoneFisse || [],
     });
     if (mioNumero !== numeroAnimazione) {
       return; // nel frattempo è cambiato qualcosa
@@ -1589,7 +2128,7 @@ async function avviaAnimazione() {
     $("btn-animazione").disabled = false;
   } catch (errore) {
     if (mioNumero === numeroAnimazione) {
-      $("testo-anteprima").textContent = "Anteprima animata non disponibile: " + errore;
+      $("testo-anteprima").textContent = t("Anteprima animata non disponibile:") + " " + errore;
       fermaAnimazione();
     }
   }
@@ -1711,6 +2250,18 @@ function apriRegolazione() {
   if (regolazioneAperta) {
     return;
   }
+  if (vista === "risultato") {
+    cambiaVista("originale"); // per regolare serve vedere il numero
+  }
+  // qui vale una zona disegnata a mano: si modifica quella
+  const file = coda[indiceAnteprima];
+  if (ultimaAnteprima && ultimaAnteprima.fissa && file && !file.foto) {
+    const zona = zonaFissaA(file, secondiCursore(file));
+    if (zona) {
+      apriZonaFissa(file.zoneFisse.indexOf(zona));
+      return;
+    }
+  }
   if (!ultimaAnteprima || !ultimaAnteprima.zona_base) {
     $("testo-anteprima").textContent =
       "Qui il display non viene trovato: sposta il cursore su un punto verde della striscia, poi premi «Regola…».";
@@ -1718,8 +2269,10 @@ function apriRegolazione() {
   }
   fermaAnimazione();
   regolazioneAperta = true;
+  fissaInModifica = null;
   zonaInModifica = Object.assign({}, ultimaAnteprima.zona);
   $("schermata-pronto").classList.add("regolazione-aperta");
+  $("barra-regola").classList.remove("modo-fissa");
   $("barra-regola").classList.remove("nascosto");
   // con un solo file "Vale per" non serve
   valeRegolazione = "questo";
@@ -1732,6 +2285,7 @@ function apriRegolazione() {
 
 function chiudiRegolazione() {
   regolazioneAperta = false;
+  fissaInModifica = null;
   trascinamento = null;
   $("schermata-pronto").classList.remove("regolazione-aperta");
   $("barra-regola").classList.add("nascosto");
@@ -1740,6 +2294,7 @@ function chiudiRegolazione() {
   $("anteprima-tela").style.setProperty("--scala", 1);
   if (ultimaAnteprima) {
     posizionaZona($("anteprima-img"), $("anteprima-zona"), ultimaAnteprima.zona);
+    $("anteprima-zona").classList.toggle("fissa", ultimaAnteprima.fissa === true);
   }
 }
 
@@ -1750,6 +2305,10 @@ function fileDaRegolare() {
 
 // "Applica": salva lo spostamento e la grandezza rispetto alla zona automatica
 function confermaRegolazione() {
+  if (fissaInModifica) {
+    confermaZonaFissa(); // si sta disegnando una zona a mano
+    return;
+  }
   const base = ultimaAnteprima.zona_base;
   const z = zonaInModifica;
   const regolazione = {
@@ -1948,7 +2507,7 @@ async function caricaFotogrammaScegli() {
     $("scegli-img").src = risposta.immagine;
     $("scegli-mirino").classList.add("nascosto");
   } catch (errore) {
-    $("scegli-fumetto").textContent = "Anteprima non disponibile: " + errore;
+    $("scegli-fumetto").textContent = t("Anteprima non disponibile:") + " " + errore;
   }
 }
 
@@ -2043,7 +2602,15 @@ function tastoPremuto(evento) {
     if (tasto === "Escape") {
       evento.preventDefault();
       chiudiDialogo(null); // Esc = nessuna scelta (non fa niente)
+    } else if (tasto === "Enter" && bersaglio === $("dialogo-campo")) {
+      chiudiDialogo(true); // Invio nella casella = conferma
     }
+    return;
+  }
+
+  // Esc esce dallo schermo intero prima di tutto il resto
+  if (tasto === "Escape" && schermoIntero) {
+    cambiaSchermoIntero();
     return;
   }
 
@@ -2117,6 +2684,15 @@ function tastoPremuto(evento) {
     togliDallaCoda(Number(rigaCoda.dataset.indice));
     return;
   }
+  // F: schermo intero · R: originale o risultato (anche con le foto)
+  if (tasto.toLowerCase() === "f" && !evento.altKey) {
+    cambiaSchermoIntero();
+    return;
+  }
+  if (tasto.toLowerCase() === "r" && !evento.altKey) {
+    cambiaVista(vista === "risultato" ? "originale" : "risultato");
+    return;
+  }
   if (!file || file.foto) {
     return;
   }
@@ -2152,22 +2728,26 @@ function animazioneInCorso() {
 }
 
 // l'elenco delle scorciatoie (Aiuto › Scorciatoie da tastiera)
+const SCORCIATOIE = [
+  ["⌘O", "Aggiungi video o foto"],
+  ["⌘⇧O", "Aggiungi una cartella"],
+  ["⌘↩", "Avvia"],
+  ["⌘,", "Impostazioni"],
+  ["", ""],
+  ["← →", "Un secondo avanti o indietro (con ⇧ 10 secondi)"],
+  ["", "Frecce sulla striscia: al prossimo punto da controllare"],
+  ["I  O", "Inizio e fine del pezzo da salvare"],
+  ["Spazio", "Guarda 3 secondi"],
+  ["R", "Originale o risultato"],
+  ["F", "Schermo intero (Esc per uscire)"],
+  ["⌥↑ ⌥↓", "Cambia l'ordine della coda"],
+  ["", ""],
+  ["", "Regola la zona: frecce per spostare, ⇧ + frecce per la grandezza, ↩ per applicare, Esc per annullare"],
+];
+
 function mostraScorciatoie() {
-  chiedi(
-    "Scorciatoie da tastiera",
-    "⌘O  Aggiungi video o foto\n" +
-      "⌘⇧O  Aggiungi una cartella\n" +
-      "⌘↩  Avvia\n" +
-      "⌘,  Impostazioni\n\n" +
-      "← →  Un secondo avanti o indietro (con ⇧ 10 secondi)\n" +
-      "Frecce sulla striscia  Al prossimo punto da controllare\n" +
-      "I  O  Inizio e fine del pezzo da salvare\n" +
-      "Spazio  Guarda 3 secondi\n" +
-      "⌥↑ ⌥↓  Cambia l'ordine della coda\n\n" +
-      "Regola la zona: frecce per spostare, ⇧ + frecce per la grandezza, ↩ per applicare, Esc per annullare",
-    "Ok",
-    ""
-  );
+  const righe = SCORCIATOIE.map((r) => (r[0] ? r[0] + "   " : "") + (r[1] ? t(r[1]) : ""));
+  chiedi(t("Scorciatoie da tastiera"), righe.join("\n"), "Ok", "");
 }
 
 // ==========================================
@@ -2205,7 +2785,7 @@ async function creaMenuMac() {
   }
   try {
     const { Menu, Submenu, MenuItem, PredefinedMenuItem } = tauri.menu;
-    const voce = (testo, tasti, azione) => MenuItem.new({ text: testo, accelerator: tasti, action: azione });
+    const voce = (testo, tasti, azione) => MenuItem.new({ text: t(testo), accelerator: tasti, action: azione });
     const fisso = (nome) => PredefinedMenuItem.new({ item: nome });
 
     const app = await Submenu.new({
@@ -2224,7 +2804,7 @@ async function creaMenuMac() {
       ],
     });
     const archivio = await Submenu.new({
-      text: "File",
+      text: t("File"),
       items: [
         await voce("Aggiungi video o foto…", "CmdOrCtrl+O", () => !alLavoro && scegliFile()),
         await voce("Aggiungi una cartella…", "CmdOrCtrl+Shift+O", () => !alLavoro && scegliCartella()),
@@ -2235,14 +2815,17 @@ async function creaMenuMac() {
       ],
     });
     const modifica = await Submenu.new({
-      text: "Modifica",
+      text: t("Modifica"),
       items: [await fisso("Undo"), await fisso("Redo"), await fisso("Separator"), await fisso("Cut"), await fisso("Copy"), await fisso("Paste"), await fisso("SelectAll")],
     });
     const video = await Submenu.new({
-      text: "Video",
+      text: t("Video"),
       items: [
         await voce("Guarda 3 secondi", undefined, () => suSchermata("pronto") && avviaAnimazione()),
         await voce("Regola la zona…", undefined, () => suSchermata("pronto") && apriRegolazione()),
+        await voce("Copri a mano qui…", undefined, () => suSchermata("pronto") && apriZonaFissa(-1)),
+        await voce("Originale / Risultato", undefined, () => suSchermata("pronto") && cambiaVista(vista === "risultato" ? "originale" : "risultato")),
+        await voce("Schermo intero", undefined, () => suSchermata("pronto") && cambiaSchermoIntero()),
         await fisso("Separator"),
         await voce("Inizio del pezzo qui", undefined, () => suSchermata("pronto") && segnaTaglio(true)),
         await voce("Fine del pezzo qui", undefined, () => suSchermata("pronto") && segnaTaglio(false)),
@@ -2250,11 +2833,11 @@ async function creaMenuMac() {
       ],
     });
     const finestra = await Submenu.new({
-      text: "Finestra",
+      text: t("Finestra"),
       items: [await fisso("Minimize"), await fisso("Maximize"), await fisso("Fullscreen")],
     });
     const aiuto = await Submenu.new({
-      text: "Aiuto",
+      text: t("Aiuto"),
       items: [await voce("Scorciatoie da tastiera", undefined, mostraScorciatoie)],
     });
     const menu = await Menu.new({ items: [app, archivio, modifica, video, finestra, aiuto] });
@@ -2270,10 +2853,8 @@ async function creaMenuMac() {
 // AVVIO: collega i bottoni
 // ==========================================
 
-async function avvio() {
-  caricaScelte();
-
-  // mette i valori salvati nei controlli
+// mette le scelte (salvate o di un preset) nei bottoni e nei cursori
+function mettiScelteNeiControlli() {
   aggiornaSegmentato("scelta-cpu", scelte.usoCpu);
   aggiornaCopertura();
   aggiornaSegmentato("scelta-momento", scelte.momento);
@@ -2281,11 +2862,23 @@ async function avvio() {
   aggiornaColori();
   $("cursore-forza").value = scelte.forza;
   $("valore-forza").textContent = scelte.forza + " px";
+  $("interruttore-volti").checked = scelte.volti;
+  disegnaPreset();
+}
+
+async function avvio() {
+  caricaScelte();
+  // la lingua: prima di tutto, così le scritte sono subito giuste
+  scegliLingua(scelte.lingua);
+  traduciPagina();
+
+  // mette i valori salvati nei controlli
+  mettiScelteNeiControlli();
   $("interruttore-aggiornamenti").checked = scelte.controllaAggiornamenti;
 
   // versione dell'app
   const versione = await tauri.app.getVersion();
-  $("testo-versione").textContent = "Versione " + versione;
+  $("testo-versione").textContent = t("Versione {versione}", { versione: versione });
 
   // schermata 1
   $("btn-scegli").addEventListener("click", scegliFile);
@@ -2490,6 +3083,52 @@ async function avvio() {
     aggiornaPannelloTutti();
   });
   $("btn-copia").addEventListener("click", copiaDettagli);
+  // cartella sorvegliata
+  $("btn-scegli-sorvegliata").addEventListener("click", scegliSorvegliata);
+  // lingua: se non stai lavorando cambia subito, se no al prossimo avvio
+  aggiornaSegmentato("scelta-lingua", scelte.lingua);
+  $("scelta-lingua").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (!b || b.dataset.valore === scelte.lingua) {
+      return;
+    }
+    scelte.lingua = b.dataset.valore;
+    salvaScelte();
+    aggiornaSegmentato("scelta-lingua", scelte.lingua);
+    if (coda.length === 0 && !alLavoro) {
+      location.reload();
+    } else {
+      $("nota-lingua").classList.remove("nascosto");
+    }
+  });
+  $("btn-togli-sorvegliata").addEventListener("click", togliSorvegliata);
+  aggiornaSorvegliata();
+  setInterval(controllaSorvegliata, 10000);
+  $("btn-schermo").addEventListener("click", cambiaSchermoIntero);
+  // zone a mano
+  $("btn-fissa-nuova").addEventListener("click", () => apriZonaFissa(-1));
+  $("scelta-segui").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (b && fissaInModifica) {
+      cambiaSegui(b.dataset.valore);
+    }
+  });
+  $("interruttore-volti").addEventListener("change", (evento) => {
+    scelte.volti = evento.target.checked;
+    salvaScelte();
+    aggiornaPannelloTutti();
+    caricaAnteprima();
+  });
+  $("btn-fissa-elimina").addEventListener("click", () => eliminaZonaFissa(fissaInModifica.indice));
+  for (const b of document.querySelectorAll("#tempi-fissa .passo")) {
+    b.addEventListener("click", () => cambiaTempoFissa(b.dataset.quale, Number(b.dataset.passo)));
+  }
+  $("scelta-vista").addEventListener("click", (evento) => {
+    const b = evento.target.closest("button");
+    if (b) {
+      cambiaVista(b.dataset.valore);
+    }
+  });
   $("btn-torna").addEventListener("click", tornaAiVideo);
   $("scelta-vale").addEventListener("click", (evento) => {
     const b = evento.target.closest("button");
@@ -2512,6 +3151,7 @@ async function avvio() {
       ingrandisciSullaZona();
     } else if (ultimaAnteprima) {
       posizionaZona($("anteprima-img"), $("anteprima-zona"), ultimaAnteprima.zona);
+      disegnaAltreZone();
     }
   });
   osservatore.observe($("anteprima-img"));
