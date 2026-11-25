@@ -12,9 +12,11 @@
   --controllo-sopra: #e7e4e0;
   --testo: #1d1c1a;
   --testo-2: #6e6a65;
-  --testo-3: #a39e98;
-  --accento: #e2690b;
-  --accento-sopra: #c95c08;
+  --testo-3: #736e68;     /* 4.6:1 sullo sfondo: si legge anche piccolo */
+  --accento: #b04e09;     /* link e bordi: 5.3:1 sul bianco */
+  --accento-sopra: #9a4508;
+  --accento-bottone: #b04e09;       /* sfondo del bottone arancione (testo bianco) */
+  --accento-bottone-sopra: #9a4508;
   --accento-tenue: #fbede2;
   --verde: #2e8b57;
   --ambra: #c7860c;
@@ -34,9 +36,11 @@
     --controllo-sopra: #3a3835;
     --testo: #f2f0ed;
     --testo-2: #aaa59f;
-    --testo-3: #79746e;
+    --testo-3: #8f8a84;
     --accento: #f07a22;
     --accento-sopra: #f58b3a;
+    --accento-bottone: #b5540b;
+    --accento-bottone-sopra: #a04a09;
     --accento-tenue: rgba(240, 122, 34, 0.16);
     --verde: #3aa66a;
     --ambra: #d99a1e;
@@ -335,8 +339,12 @@ button {
   bottom: 12px;
   transform: translateX(-50%);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   align-items: center;
   gap: 8px;
+  width: max-content;
+  max-width: calc(100% - 24px);
   padding: 8px 8px 8px 14px;
   border-radius: 8px;
   background: rgba(24, 23, 22, 0.92);
@@ -358,6 +366,7 @@ button {
 /* mentre regoli, cursore, striscia e pannello sono fermi */
 .regolazione-aperta #cursore-anteprima,
 .regolazione-aperta .striscia,
+.regolazione-aperta .sotto-cursore,
 .regolazione-aperta .pannello {
   opacity: 0.4;
   pointer-events: none;
@@ -549,12 +558,12 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 }
 
 .bottone.primario {
-  background: var(--accento);
+  background: var(--accento-bottone);
   color: #fff;
 }
 
 .bottone.primario:hover {
-  background: var(--accento-sopra);
+  background: var(--accento-bottone-sopra);
 }
 
 .bottone.secondario {
@@ -1200,4 +1209,227 @@ button.riga-file.attivo:hover {
   background: var(--controllo);
   opacity: 0.7;
   cursor: grabbing;
+}
+
+/* ---------- TASTIERA: si vede dove si è ---------- */
+
+:focus-visible {
+  outline: 2px solid var(--accento);
+  outline-offset: 2px;
+}
+
+.segmentato button:focus-visible,
+.riga-file:focus-visible {
+  outline-offset: -2px;
+}
+
+/* chi chiede meno animazioni nel sistema non le vede */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---------- REGOLA LA ZONA: "vale per" ---------- */
+
+.vale-per {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.segmentato.scuro {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.segmentato.scuro button {
+  color: #fff;
+}
+
+.segmentato.scuro button.attivo {
+  background: rgba(255, 255, 255, 0.28);
+  box-shadow: none;
+}
+
+/* ---------- STRISCIA: segni [ ] del pezzo da salvare ---------- */
+
+.striscia {
+  position: relative;
+  border-radius: 4px;
+}
+
+.segno-taglio {
+  position: absolute;
+  top: -1px;
+  width: 6px;
+  height: 14px;
+  border: 2px solid var(--accento);
+  pointer-events: none;
+}
+
+.segno-taglio.inizio {
+  border-right: none;
+}
+
+.segno-taglio.fine {
+  border-left: none;
+  transform: translateX(-100%);
+}
+
+/* sotto la striscia: "1:12 / 3:04" a sinistra, [ Inizio qui  Fine qui ] a destra */
+.sotto-cursore {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: -4px;
+}
+
+.tempo-cursore {
+  color: var(--testo-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bottoni-taglio {
+  display: flex;
+  gap: 6px;
+}
+
+.legenda .simbolo {
+  font-weight: 700;
+}
+
+/* i quadratini della legenda con lo stesso disegno della striscia */
+.legenda i.ambra {
+  background: repeating-linear-gradient(135deg, var(--ambra) 0 2px, rgba(255, 255, 255, 0.55) 2px 3px);
+}
+
+.legenda i.rosso {
+  background: repeating-linear-gradient(90deg, var(--rosso) 0 3px, transparent 3px 4px);
+}
+
+/* ---------- CODA: maniglia ⋮⋮ e pallino dello stato ---------- */
+
+.riga-file > .icona.maniglia-riga {
+  width: 14px;
+  margin: 0 -6px 0 -4px;
+  color: var(--testo-3);
+  cursor: grab;
+}
+
+.pallino-stato {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: 0.5px;
+  background: var(--testo-3);
+}
+
+.pallino-stato.verde { background: var(--verde); }
+.pallino-stato.ambra { background: var(--ambra); }
+.pallino-stato.rosso { background: var(--rosso); }
+.pallino-stato.attesa { background: transparent; box-shadow: inset 0 0 0 1.5px var(--testo-3); }
+
+/* ---------- PANNELLO: "Per tutti i video" si apre e si chiude ---------- */
+
+.gruppo-titolo.apribile {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.gruppo-titolo.apribile > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gruppo-titolo.apribile .icona {
+  width: 14px;
+  height: 14px;
+  transform: rotate(90deg);
+}
+
+.gruppo-titolo.apribile[aria-expanded="false"] .icona {
+  transform: none;
+}
+
+.riassunto {
+  overflow: hidden;
+  color: var(--testo-3);
+  font-weight: 400;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---------- SCHERMATA FINITA ---------- */
+
+.azioni-riga {
+  display: flex;
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.azioni-riga .link {
+  font-size: 12px;
+}
+
+.copia {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.copia .icona {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---------- DOMANDA AL CENTRO ---------- */
+
+.dialogo-sfondo {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.dialogo {
+  width: 340px;
+  max-width: calc(100% - 40px);
+  padding: 20px;
+  border-radius: 12px;
+  background: var(--pannello);
+  box-shadow: 0 0 0 0.5px var(--bordo), 0 12px 40px rgba(0, 0, 0, 0.25);
+}
+
+.dialogo h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.dialogo p {
+  margin: 0 0 18px;
+  color: var(--testo-2);
+  line-height: 1.5;
+  white-space: pre-line;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.dialogo-bottoni {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

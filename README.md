@@ -51,9 +51,30 @@ anche quando si muove. **Ripristina** torna alla zona automatica.
 
 ## Scorciatoie
 
-- **⌘O** (Ctrl+O su Windows): scegli i file
+Sul Mac ci sono anche nel menu in alto (Aiuto › Scorciatoie da tastiera).
+
+- **⌘O** (Ctrl+O su Windows): aggiungi video o foto · **⌘⇧O**: una cartella
+- **⌘↩**: Avvia
 - **⌘,** (Ctrl+, su Windows): Impostazioni
+- **← →**: un secondo avanti o indietro (con **⇧** 10 secondi)
+- **Frecce sulla striscia**: salta al prossimo punto da controllare
+- **I** e **O**: inizio e fine del pezzo da salvare
+- **Spazio**: guarda 3 secondi del risultato
+- **⌥↑ ⌥↓**: cambia l'ordine della coda · **Canc**: togli il file selezionato
+- **Regola la zona**: frecce per spostare, ⇧ + frecce per la grandezza, ↩ applica, Esc annulla
 - **Esc**: chiude le Impostazioni
+
+## Controlli prima di esportare
+
+- Tutti i video della coda vengono analizzati uno dopo l'altro: nella lista
+  ogni file ha un pallino (verde, arancione, rosso) e una scritta.
+- Se in un video ci sono tratti rossi (dentro il pezzo da salvare), prima di
+  partire l'app lo dice: «Controlla» porta al primo punto, «Esporta lo stesso»
+  parte comunque.
+- Alla fine, sui file da sistemare c'è «Correggi»: torna al video, sul punto
+  che non va. «Torna ai video» tiene la coda com'era.
+- Se il lavoro dura da più di un minuto, «Interrompi» chiede conferma. Anche
+  chiudere la finestra mentre lavora chiede conferma.
 
 ## Test automatici
 

@@ -9,7 +9,9 @@
 <body>
   <!-- ICONE: tutte qui, si usano con <svg class="icona"><use href="#i-nome"/></svg> -->
   <svg class="nascosto" aria-hidden="true">
-    <symbol id="i-impostazioni" viewBox="0 0 20 20"><path d="M3 6h7M14 6h3M3 14h3M10 14h7"/><circle cx="12" cy="6" r="2"/><circle cx="8" cy="14" r="2"/></symbol>
+    <symbol id="i-impostazioni" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+    <symbol id="i-maniglia" viewBox="0 0 20 20"><circle cx="8" cy="6" r="0.5"/><circle cx="12" cy="6" r="0.5"/><circle cx="8" cy="10" r="0.5"/><circle cx="12" cy="10" r="0.5"/><circle cx="8" cy="14" r="0.5"/><circle cx="12" cy="14" r="0.5"/></symbol>
+    <symbol id="i-copia" viewBox="0 0 20 20"><rect x="7" y="7" width="9" height="9" rx="1.5"/><path d="M13 4.5H5.5a1 1 0 0 0-1 1V13"/></symbol>
     <symbol id="i-piu" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
     <symbol id="i-cartella" viewBox="0 0 20 20"><path d="M3 6.5V15a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1H9.5L8 5H4a1 1 0 0 0-1 1.5z"/></symbol>
     <symbol id="i-spunta" viewBox="0 0 20 20"><path d="M5 10.5l3.2 3.2L15 6.8"/></symbol>
@@ -29,7 +31,7 @@
       <strong data-tauri-drag-region>Velocità</strong>
       <span id="barra-sottotitolo" data-tauri-drag-region></span>
     </div>
-    <button id="btn-impostazioni" class="bottone-icona" title="Impostazioni (⌘,)">
+    <button id="btn-impostazioni" class="bottone-icona" title="Impostazioni (⌘,)" aria-label="Impostazioni">
       <svg class="icona"><use href="#i-impostazioni"/></svg>
     </button>
   </header>
@@ -87,20 +89,36 @@
 
           <!-- comandi mentre regoli la zona -->
           <div id="barra-regola" class="barra-regola nascosto">
-            <span>Trascina per spostare, tira gli angoli. Vale per tutto il video.</span>
+            <span title="Con le frecce sposti, con Maiusc + frecce cambi la grandezza">Trascina o tira gli angoli</span>
+            <span class="vale-per">Vale per</span>
+            <div id="scelta-vale" class="segmentato scuro">
+              <button data-valore="questo" class="attivo">Questo video</button>
+              <button data-valore="tutti">Tutti i video</button>
+            </div>
             <button id="btn-regola-ripristina" class="bottone scuro piccolo">Ripristina</button>
             <button id="btn-regola-annulla" class="bottone scuro piccolo">Annulla</button>
-            <button id="btn-regola-fatto" class="bottone primario piccolo">Fatto</button>
+            <button id="btn-regola-fatto" class="bottone primario piccolo">Applica</button>
           </div>
         </div>
-        <input id="cursore-anteprima" type="range" min="0" max="1000" value="300">
+        <input id="cursore-anteprima" type="range" min="0" max="1000" value="300" aria-label="Punto del video">
 
         <!-- striscia colorata: dove il display viene trovato nel video -->
-        <div id="striscia" class="striscia" title="Clicca per andare in quel punto">
+        <div id="striscia" class="striscia" tabindex="0" role="group" aria-label="Copertura del video: con le frecce salti ai punti da controllare" title="Clicca per andare in quel punto · frecce: salta ai punti da controllare">
           <canvas id="striscia-tela"></canvas>
+          <span id="segno-inizio" class="segno-taglio inizio nascosto"></span>
+          <span id="segno-fine" class="segno-taglio fine nascosto"></span>
+        </div>
+
+        <!-- tempo del cursore e pezzo del video da salvare -->
+        <div id="sotto-cursore" class="sotto-cursore">
+          <span id="tempo-cursore" class="tempo-cursore">0:00 / 0:00</span>
+          <span class="bottoni-taglio">
+            <button id="btn-inizio" class="bottone secondario piccolo" title="Il video salvato inizia qui (tasto I)">[ Inizio qui</button>
+            <button id="btn-fine-taglio" class="bottone secondario piccolo" title="Il video salvato finisce qui (tasto O)">Fine qui ]</button>
+          </span>
         </div>
         <div id="legenda" class="legenda"></div>
-        <p id="testo-anteprima" class="nota">La zona tratteggiata è quella che verrà coperta. Sposta il cursore per controllare.</p>
+        <p id="testo-anteprima" class="nota">La zona tratteggiata è quella che verrà coperta. Doppio clic sulla zona per regolarla.</p>
       </div>
 
       <aside class="pannello">
@@ -114,68 +132,64 @@
           </div>
           <div id="lista-coda" class="lista-file"></div>
 
-          <div class="gruppo-titolo"><span>Uscita</span></div>
-          <div class="riga">
-            <span>Salva in</span>
-            <span id="nome-cartella" class="valore">Accanto al video</span>
-            <button id="btn-reset-cartella" class="bottone-icona piccolo nascosto" title="Salva accanto al video">
-              <svg class="icona"><use href="#i-x"/></svg>
-            </button>
-            <button id="btn-cambia-cartella" class="link">Cambia</button>
+          <!-- vale solo per il video mostrato nell'anteprima -->
+          <div id="gruppo-questo">
+            <div class="gruppo-titolo"><span>Solo questo video</span></div>
+            <div class="riga">
+              <span>Zona</span>
+              <span id="testo-zona" class="valore">Automatica</span>
+              <button id="btn-regola" class="link">Regola…</button>
+            </div>
+            <div id="riga-parte" class="riga">
+              <span>Parte</span>
+              <span id="testo-parte" class="valore">Tutto il video</span>
+              <button id="btn-tutto-video" class="link nascosto">Tutto</button>
+            </div>
           </div>
 
-          <div class="gruppo-titolo"><span>Copertura</span></div>
-          <div class="riga">
-            <span>Stile</span>
-            <div id="scelta-stile" class="segmentato">
-              <button data-valore="pixel" class="attivo">Pixel</button>
-              <button data-valore="sfocatura">Sfocato</button>
-              <button data-valore="nero">Nero</button>
-              <button data-valore="tinta">Tinta</button>
-            </div>
-          </div>
-          <div id="riga-forza" class="riga">
-            <span>Forza</span>
-            <input id="cursore-forza" type="range" min="6" max="24" value="10">
-            <span id="valore-forza" class="numero-forza">10 px</span>
-          </div>
-          <div class="riga colonna">
-            <span>Margine</span>
-            <div id="scelta-margine" class="segmentato">
-              <button data-valore="0.08">Piccolo</button>
-              <button data-valore="0.15" class="attivo">Normale</button>
-              <button data-valore="0.25">Grande</button>
-              <button data-valore="manuale">Manuale</button>
-            </div>
-          </div>
-          <div id="riga-margine-manuale" class="riga nascosto">
-            <span>Margine a mano</span>
-            <input id="cursore-margine" type="range" min="0" max="50" value="15">
-            <span id="valore-margine" class="numero-forza">15%</span>
-          </div>
-          <div class="riga">
-            <span>Zona</span>
-            <span id="testo-zona" class="valore">Automatica</span>
-            <button id="btn-regola" class="link">Regola…</button>
-          </div>
-          <p id="nota-copertura" class="nota">Più forza = quadrati più grandi. Con «Guarda 3 s» vedi il risultato.</p>
-
-          <div id="gruppo-taglio">
-            <div class="gruppo-titolo">
-              <span>Parte del video</span>
-              <button id="btn-tutto-video" class="link nascosto">Tutto il video</button>
-            </div>
+          <!-- vale per tutti i video della coda (si può chiudere) -->
+          <button id="btn-per-tutti" class="gruppo-titolo apribile" aria-expanded="true">
+            <span><svg class="icona"><use href="#i-freccia"/></svg>Per tutti i video</span>
+            <span id="riassunto-tutti" class="riassunto"></span>
+          </button>
+          <div id="gruppo-tutti">
             <div class="riga">
-              <span>Inizio</span>
-              <span id="testo-inizio" class="valore">0:00</span>
-              <button id="btn-inizio" class="link">Da qui</button>
+              <span>Stile</span>
+              <div id="scelta-stile" class="segmentato">
+                <button data-valore="pixel" class="attivo">Pixel</button>
+                <button data-valore="sfocatura">Sfocato</button>
+                <button data-valore="nero">Nero</button>
+                <button data-valore="tinta">Tinta</button>
+              </div>
             </div>
+            <div id="riga-forza" class="riga">
+              <span>Forza</span>
+              <input id="cursore-forza" type="range" min="6" max="24" value="10" aria-label="Forza">
+              <span id="valore-forza" class="numero-forza">10 px</span>
+            </div>
+            <div class="riga colonna">
+              <span>Margine</span>
+              <div id="scelta-margine" class="segmentato">
+                <button data-valore="0.08">Piccolo</button>
+                <button data-valore="0.15" class="attivo">Normale</button>
+                <button data-valore="0.25">Grande</button>
+                <button data-valore="manuale">Manuale</button>
+              </div>
+            </div>
+            <div id="riga-margine-manuale" class="riga nascosto">
+              <span>Margine a mano</span>
+              <input id="cursore-margine" type="range" min="0" max="50" value="15" aria-label="Margine a mano">
+              <span id="valore-margine" class="numero-forza">15%</span>
+            </div>
+            <p id="nota-copertura" class="nota">Più forza = quadrati più grandi. Con «Guarda 3 s» vedi il risultato.</p>
             <div class="riga">
-              <span>Fine</span>
-              <span id="testo-fine" class="valore">0:00</span>
-              <button id="btn-fine-taglio" class="link">Fino a qui</button>
+              <span>Salva in</span>
+              <span id="nome-cartella" class="valore">Accanto al video</span>
+              <button id="btn-reset-cartella" class="bottone-icona piccolo nascosto" title="Salva accanto al video" aria-label="Salva accanto al video">
+                <svg class="icona"><use href="#i-x"/></svg>
+              </button>
+              <button id="btn-cambia-cartella" class="link">Cambia</button>
             </div>
-            <p class="nota">Sposta il cursore sotto l'anteprima e premi «Da qui» o «Fino a qui» per salvare solo un pezzo.</p>
           </div>
         </div>
 
@@ -238,12 +252,14 @@
             </div>
           </div>
           <p id="esito-testo" class="esito-testo"></p>
+          <button id="btn-copia" class="link grigio copia nascosto"><svg class="icona"><use href="#i-copia"/></svg><span>Copia dettagli</span></button>
           <div id="lista-risultati" class="lista-file"></div>
         </div>
         <div class="pannello-piede">
           <button id="btn-apri" class="bottone primario largo">Apri video</button>
+          <button id="btn-mostra" class="bottone secondario largo">Mostra nella cartella</button>
           <div class="due-bottoni">
-            <button id="btn-mostra" class="bottone secondario">Mostra nella cartella</button>
+            <button id="btn-torna" class="bottone secondario">Torna ai video</button>
             <button id="btn-altro" class="bottone secondario">Nuovi video</button>
           </div>
         </div>
@@ -260,7 +276,7 @@
       </nav>
 
       <div class="impostazioni-contenuto">
-        <button id="btn-fine" class="bottone secondario piccolo bottone-fine">Fine</button>
+        <button id="btn-fine" class="bottone secondario piccolo bottone-fine">Chiudi</button>
 
         <!-- Generale -->
         <div id="sezione-generale" class="sezione-impostazioni">
@@ -373,7 +389,7 @@
           <div id="scegli-mirino" class="mirino nascosto"></div>
           <div id="scegli-fumetto" class="fumetto">Clicca sul display della moto</div>
         </div>
-        <input id="cursore-scegli" type="range" min="0" max="1000" value="300">
+        <input id="cursore-scegli" type="range" min="0" max="1000" value="300" aria-label="Punto del video">
         <p class="nota">Sposta il cursore per trovare un punto dove il display si vede bene.</p>
       </div>
 
@@ -393,6 +409,18 @@
       </aside>
     </section>
   </main>
+
+  <!-- DOMANDA: finestrella al centro (es. "Interrompere?") -->
+  <div id="dialogo" class="dialogo-sfondo nascosto">
+    <div class="dialogo" role="alertdialog" aria-modal="true" aria-labelledby="dialogo-titolo" aria-describedby="dialogo-testo">
+      <h3 id="dialogo-titolo"></h3>
+      <p id="dialogo-testo"></p>
+      <div class="dialogo-bottoni">
+        <button id="dialogo-no" class="bottone secondario"></button>
+        <button id="dialogo-si" class="bottone primario"></button>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
