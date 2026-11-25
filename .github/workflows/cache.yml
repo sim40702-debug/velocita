@@ -1,0 +1,100 @@
+# CACHE: prepara le librerie Rust già compilate, così le release (tag)
+# partono da qui e non ricompilano tutto da zero.
+#
+# Perché serve: su GitHub la cache creata da un tag la può usare solo quel
+# tag. La cache creata sul ramo main invece la possono usare tutti i tag.
+#
+# Parte da solo quando cambiano le librerie (Cargo.lock, Cargo.toml) o i
+# workflow, una volta alla settimana (così la cache non scade e segue gli
+# aggiornamenti di Rust), oppure a mano con "Run workflow".
+# Fa anche girare i test: se si rompe qualcosa lo vedi prima della release.
+
+name: Cache
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - "package-lock.json"
+      - ".github/workflows/**"
+  schedule:
+    # ogni lunedì alle 03:17 (ora UTC)
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# se ne parte uno nuovo, quello vecchio sullo stesso ramo si ferma
+concurrency:
+  group: cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # la stessa cache del job "test" della release
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      - name: Installa Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Ricorda la compilazione Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+
+      - name: Test del rilevamento
+        run: cargo test -p motore
+
+  # la stessa compilazione della release (stessi comandi e opzioni),
+  # ma senza creare gli installer
+  app:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sistema: macos-latest
+            argomenti: --target universal-apple-darwin
+            ffmpeg: universal-apple-darwin
+          - sistema: windows-latest
+            argomenti: ""
+            ffmpeg: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.sistema }}
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      - name: Installa Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Installa Python (serve per scaricare ffmpeg)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installa Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.sistema == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Ricorda la compilazione Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: app-${{ matrix.sistema }}
+
+      - name: Installa le librerie
+        run: npm ci
+
+      - name: Prendi ffmpeg
+        run: python scripts/prendi_ffmpeg.py ${{ matrix.ffmpeg }}
+
+      - name: Compila (senza installer)
+        run: npx tauri build --no-bundle ${{ matrix.argomenti }}

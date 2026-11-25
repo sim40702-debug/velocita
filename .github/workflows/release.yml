@@ -1,5 +1,9 @@
 # Crea l'app per Mac (Apple Silicon + Intel) e Windows, con ffmpeg dentro.
 # Prima fa girare i test del rilevamento: se uno fallisce, si ferma.
+#
+# VELOCITÀ: le librerie Rust già compilate (cache) le prepara il workflow
+# "Cache" (cache.yml) sul ramo main. Un tag non può salvare una cache che
+# serva al tag dopo (su GitHub ogni tag ha la sua), ma può usare quella di main.
 # - Se carichi un tag tipo v1.2.3: crea la release su GitHub con gli
 #   installer e il file latest.json che serve agli aggiornamenti automatici.
 #   Il numero di versione dell'app viene preso dal tag.
@@ -29,8 +33,13 @@ jobs:
       - name: Installa Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # usa la cache preparata da cache.yml su main (stesso nome: "test").
+      # Salva solo su main: la cache di un tag non la userebbe nessuno.
       - name: Ricorda la compilazione Rust (più veloce le volte dopo)
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test del rilevamento
         run: cargo test -p motore
@@ -71,8 +80,12 @@ jobs:
         with:
           targets: ${{ matrix.sistema == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
+      # stessa cache preparata da cache.yml su main (un nome per sistema)
       - name: Ricorda la compilazione Rust (più veloce le volte dopo)
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: app-${{ matrix.sistema }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Versione dal tag e note della release
         if: startsWith(github.ref, 'refs/tags/')

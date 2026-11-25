@@ -145,6 +145,18 @@ Nell'anteprima, in basso a sinistra, una scritta piccola (es. «Notte · Arancio
 
 Le soglie per giorno e notte sono in `motore/src/rilevamento.rs` (`SOGLIE_GIORNO`, `SOGLIE_NOTTE`).
 
+## Tempi di GitHub Actions
+
+- **Cache** (`.github/workflows/cache.yml`): prepara sul ramo `main` le librerie
+  Rust già compilate (Mac e Windows) e fa girare i test. Parte da solo quando
+  cambiano `Cargo.lock`, i `Cargo.toml` o i workflow, ogni lunedì, oppure a mano
+  ("Run workflow"). Le release (tag) partono da questa cache: su GitHub la
+  cache di un tag non la può usare il tag dopo, quella di `main` sì.
+- Le release non salvano più la cache (era tempo perso: nessuno la usava).
+- `lto = "thin"` in `Cargo.toml`: il collegamento finale usa tutti i core.
+
+Prima di un tag, controlla nella pagina Actions che "Cache" sia verde.
+
 ## Release e aggiornamenti automatici
 
 Carichi un tag con la versione (v minuscola). Il messaggio del tag è la novità che l'app mostra nell'avviso di aggiornamento:
