@@ -241,6 +241,27 @@
             <span id="riassunto-tutti" class="riassunto"></span>
           </button>
           <div id="gruppo-tutti">
+            <!-- COPRI ANCHE: persone e targhe, si accendono e spengono qui -->
+            <div class="riga">
+              <div class="riga-testi">
+                <span>Persone</span>
+                <span class="aiuto">Copre le facce viste di fronte. L'esportazione è più lenta.</span>
+              </div>
+              <label class="interruttore">
+                <input id="interruttore-volti" type="checkbox">
+                <span></span>
+              </label>
+            </div>
+            <div class="riga">
+              <div class="riga-testi">
+                <span>Targhe</span>
+                <span class="aiuto">Con «Copri qui…» › «Segue» disegni la zona sulla targa e la segue.</span>
+              </div>
+              <label class="interruttore">
+                <input id="interruttore-targhe" type="checkbox">
+                <span></span>
+              </label>
+            </div>
             <!-- impostazioni salvate con un nome -->
             <div class="riga colonna">
               <span>Preset</span>
@@ -273,13 +294,6 @@
               <span>Margine a mano</span>
               <input id="cursore-margine" type="range" min="0" max="50" value="15" aria-label="Margine a mano">
               <span id="valore-margine" class="numero-forza">15%</span>
-            </div>
-            <div class="riga">
-              <span title="Copre anche le facce delle persone viste di fronte">Copri anche i volti</span>
-              <label class="interruttore">
-                <input id="interruttore-volti" type="checkbox">
-                <span></span>
-              </label>
             </div>
             <p id="nota-copertura" class="nota">Più forza = quadrati più grandi. Con «Guarda 3 s» vedi il risultato.</p>
             <div class="riga">

@@ -6,7 +6,8 @@
 # serva al tag dopo (su GitHub ogni tag ha la sua), ma può usare quella di main.
 # - Se carichi un tag tipo v1.2.3: crea la release su GitHub con gli
 #   installer e il file latest.json che serve agli aggiornamenti automatici.
-#   Il numero di versione dell'app viene preso dal tag.
+#   Il numero di versione dell'app viene preso dal tag, il testo della
+#   release da note-release/<tag>.md (vedi scripts/note_release.mjs).
 # - Se premi "Run workflow" nella pagina Actions: crea solo gli installer,
 #   li trovi in fondo alla pagina del run (per provare).
 
@@ -93,11 +94,12 @@ jobs:
         run: |
           VERSIONE="${GITHUB_REF_NAME#v}"
           node -e "const fs=require('fs');const f='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f));c.version='$VERSIONE';fs.writeFileSync(f,JSON.stringify(c,null,2));"
-          # il messaggio del tag diventa la descrizione della novità
-          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          # la descrizione della release: note-release/<tag>.md (con le immagini),
+          # se non c'è l'elenco dei commit (serve la storia completa e i tag)
+          git fetch --quiet --tags --unshallow origin || git fetch --quiet --tags origin
           {
             echo "NOTE<<FINE_NOTE"
-            git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)'
+            node scripts/note_release.mjs "${GITHUB_REF_NAME}"
             echo "FINE_NOTE"
           } >> "$GITHUB_ENV"
 

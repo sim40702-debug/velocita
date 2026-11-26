@@ -2388,3 +2388,15 @@ button.riga-file.attivo:hover {
   width: 18px;
   background: var(--accento);
 }
+
+/* ---------- PERSONE E TARGHE ---------- */
+
+/* «Targhe» spento: quando disegni una zona non c'è la scelta «Segue» */
+.senza-targhe .barra-regola.modo-fissa #scelta-segui {
+  display: none;
+}
+
+/* le zone che seguono una targa restano nella lista, ma spente */
+.riga-fissa.spenta {
+  opacity: 0.55;
+}

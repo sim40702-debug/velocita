@@ -48,6 +48,7 @@ const scelte = {
   controllaAggiornamenti: true,
   pannelloTutti: true,   // la parte "Per tutti i video" del pannello è aperta
   volti: false,         // copre anche le facce delle persone
+  targhe: false,        // le zone a mano che seguono un oggetto (targhe)
   lingua: "auto",       // "auto" (quella del computer), "it", "en" o "de"
   tema: "auto",         // "auto" (come il Mac), "chiaro" o "scuro"
   miniature: true,      // un fotogramma accanto a ogni video nella lista
@@ -224,6 +225,9 @@ function testoCoda() {
   const video = coda.filter((f) => !f.foto).length;
   const foto = coda.length - video;
   if (foto === 0) {
+    if (video === 1) {
+      return t("1 video"); // in inglese e tedesco senza la "s" del plurale
+    }
     return t("{n} video", { n: video });
   }
   if (video === 0) {
@@ -490,7 +494,10 @@ function aggiornaPannelloTutti() {
   }
   riassunto += " · " + t("margine {n}%", { n: Math.round(scelte.margine * 100) });
   if (scelte.volti) {
-    riassunto += " · " + t("volti");
+    riassunto += " · " + t("persone");
+  }
+  if (scelte.targhe) {
+    riassunto += " · " + t("targhe");
   }
   $("riassunto-tutti").textContent = aperto ? "" : riassunto;
   // il preset uguale alle scelte di adesso si colora
@@ -643,7 +650,7 @@ async function caricaAnteprima() {
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
       display: sceltaDisplay(file),
-      fisse: file.zoneFisse || [],
+      fisse: zoneDaUsare(file),
     });
     if (mioNumero !== numeroAnteprima) {
       return; // nel frattempo è stata chiesta un'altra anteprima
@@ -800,7 +807,7 @@ function cambiaSchermoIntero() {
 // ==========================================
 
 // le scelte che un preset si ricorda
-const SCELTE_PRESET = ["stile", "forza", "margine", "margineManuale", "volti", "momento", "colore", "coloreVideo", "posizione"];
+const SCELTE_PRESET = ["stile", "forza", "margine", "margineManuale", "volti", "targhe", "momento", "colore", "coloreVideo", "posizione"];
 
 function caricaPreset() {
   try {
@@ -1218,7 +1225,7 @@ async function avvia(automatico) {
         debug: $("interruttore-prova").checked,
         display: sceltaDisplay(file),
         taglio: file.taglio ? [file.taglio.inizio, file.taglio.fine] : null,
-        fisse: file.zoneFisse || [],
+        fisse: zoneDaUsare(file),
       });
 
       if (risultato.interrotto) {
@@ -1315,7 +1322,7 @@ function preparaSchermataCorso(file, indice) {
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
       display: sceltaDisplay(file),
-      fisse: file.zoneFisse || [],
+      fisse: zoneDaUsare(file),
     })
       .then((r) => {
         file.coppia = { prima: r.immagine, dopo: r.risultato, zona: r.zona };
@@ -1635,8 +1642,8 @@ async function controllaAggiornamenti(manuale) {
     aggiornamento = await tauri.updater.check();
     if (aggiornamento) {
       $("avviso-titolo").textContent = t("È disponibile la versione {versione}", { versione: aggiornamento.version });
-      // prima riga delle note della release
-      const note = (aggiornamento.body || "").split("\n").find((r) => r.trim() !== "") || "";
+      // prima riga delle note della release (salta le righe vuote e le immagini)
+      const note = (aggiornamento.body || "").split("\n").find((r) => r.trim() !== "" && !r.trim().startsWith("![")) || "";
       $("avviso-note").textContent = note.replace(/^[#*\-\s]+/, "");
       $("avviso").classList.remove("nascosto");
       if (manuale) {
@@ -1833,6 +1840,12 @@ function dentroTaglio(file, i) {
   const c = file.copertura;
   const secondi = (i / Math.max(c.totali, c.stati.length)) * file.durata;
   return secondi >= file.taglio.inizio && secondi <= file.taglio.fine;
+}
+
+// le zone a mano da mandare al motore: quelle che seguono un oggetto
+// (targhe) solo se l'interruttore «Targhe» è acceso
+function zoneDaUsare(file) {
+  return (file.zoneFisse || []).filter((z) => !z.segui || scelte.targhe);
 }
 
 // la zona a mano che vale in quel secondo (null = nessuna).
@@ -2044,7 +2057,7 @@ function disegnaStriscia() {
       pezzi.push('<span><i class="rosso"></i><b class="simbolo">✕</b>' + t("Non trovato") + " · " + testoTratti(mancanti) + "</span>");
     }
   }
-  const seguiti = (file.zoneFisse || []).filter((z) => z.segui).length;
+  const seguiti = scelte.targhe ? (file.zoneFisse || []).filter((z) => z.segui).length : 0;
   if (seguiti > 0) {
     pezzi.push('<span><b class="simbolo">↝</b>' + t("Segue") + " · " + (seguiti === 1 ? t("1 oggetto") : t("{n} oggetti", { n: seguiti })) + "</span>");
   }
@@ -2294,6 +2307,11 @@ function apriZonaFissa(indice) {
   ingrandisciSullaZona();
 }
 
+// con «Targhe» spento la scelta «Ferma / Segue» non si vede
+function aggiornaTarghe() {
+  document.body.classList.toggle("senza-targhe", !scelte.targhe);
+}
+
 // "Ferma" o "Segue": con "Segue" la zona parte da questo fotogramma
 // (dove l'hai disegnata) e va dietro all'oggetto finché lo vede
 function cambiaSegui(valore) {
@@ -2410,7 +2428,8 @@ function disegnaZoneFisse() {
     togli.addEventListener("click", () => eliminaZonaFissa(i));
     const tipo = document.createElement("span");
     tipo.className = "tipo-fissa";
-    tipo.textContent = z.segui ? t("segue") : t("ferma");
+    tipo.textContent = z.segui ? (scelte.targhe ? t("segue") : t("segue · spenta")) : t("ferma");
+    riga.classList.toggle("spenta", z.segui && !scelte.targhe);
     tempi.appendChild(tipo);
     riga.appendChild(tempi);
     riga.appendChild(togli);
@@ -2673,7 +2692,7 @@ async function avviaAnimazione() {
       forza: Number(scelte.forza),
       margine: Number(scelte.margine),
       display: sceltaDisplay(file),
-      fisse: file.zoneFisse || [],
+      fisse: zoneDaUsare(file),
     });
     if (mioNumero !== numeroAnimazione) {
       return; // nel frattempo è cambiato qualcosa
@@ -3431,6 +3450,8 @@ function mettiScelteNeiControlli() {
   $("cursore-forza").value = scelte.forza;
   $("valore-forza").textContent = scelte.forza + " px";
   $("interruttore-volti").checked = scelte.volti;
+  $("interruttore-targhe").checked = scelte.targhe;
+  aggiornaTarghe();
   disegnaPreset();
 }
 
@@ -3734,6 +3755,15 @@ async function avvio() {
     if (b && fissaInModifica) {
       cambiaSegui(b.dataset.valore);
     }
+  });
+  $("interruttore-targhe").addEventListener("change", (evento) => {
+    scelte.targhe = evento.target.checked;
+    salvaScelte();
+    aggiornaPannelloTutti();
+    aggiornaTarghe();
+    disegnaZoneFisse();
+    disegnaStriscia();
+    caricaAnteprima();
   });
   $("interruttore-volti").addEventListener("change", (evento) => {
     scelte.volti = evento.target.checked;

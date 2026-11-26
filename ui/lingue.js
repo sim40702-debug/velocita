@@ -20,6 +20,7 @@ const TRADUZIONI = {
     "I tuoi video non vengono mai inviati in internet: tutto avviene sul computer.":
       "Your videos are never sent over the internet: everything happens on your computer.",
     "{n} video": "{n} videos",
+    "1 video": "1 video",
     "{n} foto": "{n} photos",
     "{n} file": "{n} files",
     "File": "Files",
@@ -365,6 +366,14 @@ const TRADUZIONI = {
     "Regola la zona: frecce per spostare, ⇧ + frecce per la grandezza, ↩ per applicare, Esc per annullare":
       "Adjust the area: arrows to move, ⇧ + arrows for the size, ↩ to apply, Esc to cancel",
 
+    // ---------- persone e targhe ----------
+    "Persone": "People",
+    "Copre le facce viste di fronte. L'esportazione è più lenta.": "Covers faces seen from the front. Exporting is slower.",
+    "Targhe": "Number plates",
+    "Con «Copri qui…» › «Segue» disegni la zona sulla targa e la segue.": "With «Cover here…» › «Follows» you draw the area on the plate and it follows it.",
+    "persone": "people",
+    "targhe": "plates",
+    "segue · spenta": "follows · off",
     // ---------- grafica nuova e tratti da controllare ----------
     "1 tratto «Va bene così»": "1 section «Looks fine»",
     "{n} tratti «Va bene così»": "{n} sections «Looks fine»",
@@ -423,6 +432,7 @@ const TRADUZIONI = {
     "I tuoi video non vengono mai inviati in internet: tutto avviene sul computer.":
       "Deine Videos werden nie ins Internet geschickt: alles passiert auf dem Computer.",
     "{n} video": "{n} Videos",
+    "1 video": "1 Video",
     "{n} foto": "{n} Fotos",
     "{n} file": "{n} Dateien",
     "File": "Dateien",
@@ -768,6 +778,14 @@ const TRADUZIONI = {
     "Regola la zona: frecce per spostare, ⇧ + frecce per la grandezza, ↩ per applicare, Esc per annullare":
       "Bereich anpassen: Pfeile zum Verschieben, ⇧ + Pfeile für die Größe, ↩ zum Anwenden, Esc zum Abbrechen",
 
+    // ---------- persone e targhe ----------
+    "Persone": "Personen",
+    "Copre le facce viste di fronte. L'esportazione è più lenta.": "Verdeckt Gesichter, die von vorne zu sehen sind. Der Export dauert länger.",
+    "Targhe": "Nummernschilder",
+    "Con «Copri qui…» › «Segue» disegni la zona sulla targa e la segue.": "Mit «Hier verdecken…» › «Folgt» zeichnest du den Bereich auf das Schild und er folgt ihm.",
+    "persone": "Personen",
+    "targhe": "Nummernschilder",
+    "segue · spenta": "folgt · aus",
     // ---------- grafica nuova e tratti da controllare ----------
     "1 tratto «Va bene così»": "1 Abschnitt «Passt so»",
     "{n} tratti «Va bene così»": "{n} Abschnitte «Passt so»",

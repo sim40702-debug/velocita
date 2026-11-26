@@ -159,12 +159,20 @@ Prima di un tag, controlla nella pagina Actions che "Cache" sia verde.
 
 ## Release e aggiornamenti automatici
 
-Carichi un tag con la versione (v minuscola). Il messaggio del tag è la novità che l'app mostra nell'avviso di aggiornamento:
+Carichi un tag con la versione (v minuscola):
 
 ```bash
-git tag -a v1.2.3 -m "Anteprima più veloce"
+git tag v1.2.3
 git push origin v1.2.3
 ```
+
+### Testo e immagini delle release
+
+Le novità si scrivono man mano in `note-release/prossima.md`. Le immagini vanno in `note-release/immagini/` e si mettono nel testo così: `![descrizione](immagini/foto.png)`.
+
+Prima del tag, il file si rinomina con la versione (es. `note-release/v1.2.3.md`): GitHub Actions lo usa come testo della release. La prima riga è quella che l'app mostra nell'avviso di aggiornamento, quindi conviene una frase corta senza immagine. Se il file non c'è, la release mostra l'elenco dei commit.
+
+Per cambiare il testo di una release già fatta basta modificare il suo file e fare push su `main`: il workflow «Note delle release» la aggiorna.
 
 GitHub Actions crea l'installer per Mac (`.dmg`, Apple Silicon e Intel) e per Windows (`.exe`), e il file `latest.json`.
 All'avvio l'app guarda `latest.json` dell'ultima release: se c'è una versione nuova mostra l'avviso con **Aggiorna**.

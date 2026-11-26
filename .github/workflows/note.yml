@@ -1,0 +1,42 @@
+# Aggiorna il testo delle release che esistono già.
+# Quando cambi un file in note-release/ (es. note-release/v0.3.6.md) e fai
+# push su main, la release v0.3.6 su GitHub prende il testo nuovo.
+# Le release nuove invece prendono il testo da sole (vedi release.yml).
+
+name: Note delle release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "note-release/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  note:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scarica il codice
+        uses: actions/checkout@v4
+
+      - name: Metti le note nelle release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for file in note-release/v*.md; do
+            [ -e "$file" ] || continue
+            tag=$(basename "$file" .md)
+            # solo se la release esiste già (se no la crea release.yml)
+            if gh release view "$tag" > /dev/null 2>&1; then
+              node scripts/note_release.mjs "$tag" > note.txt
+              gh release edit "$tag" --notes-file note.txt
+              echo "Aggiornata $tag"
+            else
+              echo "$tag non esiste ancora: salto"
+            fi
+          done
+          rm -f note.txt
