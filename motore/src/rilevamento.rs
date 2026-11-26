@@ -189,6 +189,9 @@ pub struct Impostazioni {
     pub stile: Stile,
     /// Copre anche le facce delle persone
     pub volti: bool,
+    /// Dove sta di solito il display in questo video (la calcola l'analisi).
+    /// None = non si sa ancora: vince la zona più simile al display.
+    pub casa: Option<Riquadro>,
 }
 
 impl Default for Impostazioni {
@@ -203,6 +206,7 @@ impl Default for Impostazioni {
             regolazione: Regolazione::nessuna(),
             stile: Stile::Pixel,
             volti: false,
+            casa: None,
         }
     }
 }
@@ -599,9 +603,29 @@ pub fn trova_display(foto: &Fotogramma, imp: &Impostazioni) -> Option<Riquadro> 
 /// - 1 = nessun'altra zona assomiglia al display
 /// - vicino a 0 = da un'altra parte c'è una zona quasi uguale (un "rivale"),
 ///   quindi l'app potrebbe aver scelto quella sbagliata
+/// Se si sa dove sta di solito il display (imp.casa), sceglie la zona lì.
 pub fn trova_display_con_sicurezza(foto: &Fotogramma, imp: &Impostazioni) -> Option<(Riquadro, f32)> {
+    let candidati = trova_candidati(foto, imp);
+    scegli_display(&candidati, imp.casa)
+}
+
+/// Quante zone tiene per ogni fotogramma (le più simili al display).
+pub const MASSIMO_CANDIDATI: usize = 4;
+
+/// Una zona che potrebbe essere il display: il riquadro (già con il
+/// margine, nella grandezza vera del video) e quanto assomiglia al display.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Candidato {
+    pub riquadro: Riquadro,
+    pub punteggio: f32,
+}
+
+/// Le zone che potrebbero essere il display, dalla più probabile alla meno
+/// (al massimo MASSIMO_CANDIDATI). Vuota se non trova niente.
+pub fn trova_candidati(foto: &Fotogramma, imp: &Impostazioni) -> Vec<Candidato> {
+    let mut risultato = Vec::new();
     if foto.larghezza < 2 || foto.altezza < 2 {
-        return None;
+        return risultato;
     }
     let (maschera, luminosi, pw, ph, _momento) = maschera_colore(foto, imp);
 
@@ -611,12 +635,11 @@ pub fn trova_display_con_sicurezza(foto: &Fotogramma, imp: &Impostazioni) -> Opt
     let maschera = dilata_o_erodi(&maschera, pw, ph, false);
     let maschera = dilata_o_erodi(&maschera, pw, ph, true);
 
-    // sceglie il display tra le zone arancioni:
-    // - non troppo piccola e nella parte bassa dell'immagine
-    // - vince quella con il punteggio più alto (vedi punteggio_display)
+    // le zone arancioni che possono essere il display:
+    // - non troppo piccole e nella parte bassa dell'immagine
+    // - più larghe che alte
     let area_minima = 500.0 * SCALA_RILEVAMENTO * SCALA_RILEVAMENTO; // proporzionata alla scala ridotta
     let zone = trova_zone(&maschera, &luminosi, pw, ph);
-    let mut migliore: Option<&Zona> = None;
     let mut candidate: Vec<&Zona> = Vec::new();
     for z in &zone {
         if z.area <= area_minima || z.luminosi == 0 {
@@ -632,59 +655,124 @@ pub fn trova_display_con_sicurezza(foto: &Fotogramma, imp: &Impostazioni) -> Opt
             continue;
         }
         candidate.push(z);
-        if migliore.is_none() || punteggio_display(z) > punteggio_display(migliore.unwrap()) {
-            migliore = Some(z);
-        }
     }
-    let z = migliore?;
 
-    // a volte il display è diviso in più pezzi (le cifre scure lo tagliano):
-    // unisce al pezzo scelto i pezzi vicini accesi almeno la metà di lui
-    let vicino = z.h;
-    let punteggio_minimo = punteggio_display(z) / 2.0;
-    let (mut x1, mut y1, mut x2, mut y2) = (z.x, z.y, z.x + z.w, z.y + z.h);
-    for altra in &zone {
-        if altra.luminosi == 0 || punteggio_display(altra) < punteggio_minimo {
+    // dalla più simile al display alla meno
+    candidate.sort_by(|a, b| punteggio_display(b).total_cmp(&punteggio_display(a)));
+
+    for z in candidate.iter().take(MASSIMO_CANDIDATI) {
+        // a volte il display è diviso in più pezzi (le cifre scure lo tagliano):
+        // unisce al pezzo scelto i pezzi vicini accesi almeno la metà di lui
+        let vicino = z.h;
+        let punteggio_minimo = punteggio_display(z) / 2.0;
+        let (mut x1, mut y1, mut x2, mut y2) = (z.x, z.y, z.x + z.w, z.y + z.h);
+        for altra in &zone {
+            if altra.luminosi == 0 || punteggio_display(altra) < punteggio_minimo {
+                continue;
+            }
+            let tocca = altra.x < z.x + z.w + vicino
+                && altra.x + altra.w > z.x - vicino
+                && altra.y < z.y + z.h + vicino
+                && altra.y + altra.h > z.y - vicino;
+            if tocca {
+                x1 = x1.min(altra.x);
+                y1 = y1.min(altra.y);
+                x2 = x2.max(altra.x + altra.w);
+                y2 = y2.max(altra.y + altra.h);
+            }
+        }
+
+        // riporta le coordinate alla risoluzione originale
+        let inv = 1.0 / SCALA_RILEVAMENTO;
+        let x = (x1 as f32 * inv) as i32;
+        let y = (y1 as f32 * inv) as i32;
+        let w = ((x2 - x1) as f32 * inv) as i32;
+        let h = ((y2 - y1) as f32 * inv) as i32;
+
+        // aggiunge il margine di sicurezza, senza uscire dal fotogramma
+        let pad_x = (w as f32 * imp.margine) as i32;
+        let pad_y = (h as f32 * imp.margine) as i32;
+        let fine_x = (foto.larghezza as i32).min(x + w + pad_x);
+        let fine_y = (foto.altezza as i32).min(y + h + pad_y);
+        let x = 0.max(x - pad_x);
+        let y = 0.max(y - pad_y);
+
+        let riquadro = Riquadro { x, y, w: fine_x - x, h: fine_y - y };
+        // un pezzo già unito a una zona migliore non si ripete
+        if risultato.iter().any(|c: &Candidato| c.riquadro == riquadro) {
             continue;
         }
-        let tocca = altra.x < z.x + z.w + vicino
-            && altra.x + altra.w > z.x - vicino
-            && altra.y < z.y + z.h + vicino
-            && altra.y + altra.h > z.y - vicino;
-        if tocca {
-            x1 = x1.min(altra.x);
-            y1 = y1.min(altra.y);
-            x2 = x2.max(altra.x + altra.w);
-            y2 = y2.max(altra.y + altra.h);
+        risultato.push(Candidato { riquadro, punteggio: punteggio_display(z) });
+    }
+    risultato
+}
+
+/// Sceglie il display tra i candidati (in ordine, dal migliore) e dice
+/// quanto è sicuro (da 0 a 1).
+/// - senza `casa`: vince il migliore
+/// - con `casa` (dove sta di solito il display in questo video): vince il
+///   migliore vicino alla casa, anche se da un'altra parte c'è qualcosa di
+///   molto più luminoso (un lampione al sodio può esserlo 50 volte di più).
+///   Se vicino alla casa non c'è niente, prende il migliore ma con
+///   sicurezza 0, così nella striscia diventa arancione.
+pub fn scegli_display(candidati: &[Candidato], casa: Option<Riquadro>) -> Option<(Riquadro, f32)> {
+    let migliore = *candidati.first()?;
+    let mut scelto = migliore;
+    let mut a_casa = false;
+    let mut lontano_da_casa = false;
+
+    if let Some(casa) = casa {
+        // il primo vicino alla casa è il migliore lì (sono in ordine)
+        let vicino_a_casa = candidati.iter().find(|c| vicini(casa, c.riquadro));
+        match vicino_a_casa {
+            Some(c) => {
+                scelto = *c;
+                a_casa = true;
+            }
+            None => {
+                lontano_da_casa = true;
+            }
         }
     }
 
     // sicurezza: c'è un rivale lontano dal display scelto?
     let mut rivale = 0.0;
-    for altra in &candidate {
-        let lontana = altra.x > x2 + vicino || altra.x + altra.w < x1 - vicino || altra.y > y2 + vicino || altra.y + altra.h < y1 - vicino;
-        if lontana {
-            rivale = f32::max(rivale, punteggio_display(altra));
+    for altro in candidati {
+        if !vicini(scelto.riquadro, altro.riquadro) && !vicini(altro.riquadro, scelto.riquadro) {
+            rivale = f32::max(rivale, altro.punteggio);
         }
     }
-    let sicurezza = (1.0 - rivale / punteggio_display(z).max(0.001)).clamp(0.0, 1.0);
+    let mut sicurezza = (1.0 - rivale / scelto.punteggio.max(0.001)).clamp(0.0, 1.0);
+    if a_casa {
+        // è dove sta sempre: un lampione da un'altra parte non lo rende dubbio
+        sicurezza = sicurezza.max(0.5);
+    }
+    if lontano_da_casa {
+        // non è dove sta di solito: meglio dare un'occhiata
+        sicurezza = 0.0;
+    }
+    Some((scelto.riquadro, sicurezza))
+}
 
-    // riporta le coordinate alla risoluzione originale
-    let inv = 1.0 / SCALA_RILEVAMENTO;
-    let x = (x1 as f32 * inv) as i32;
-    let y = (y1 as f32 * inv) as i32;
-    let w = ((x2 - x1) as f32 * inv) as i32;
-    let h = ((y2 - y1) as f32 * inv) as i32;
-
-    // aggiunge il margine di sicurezza, senza uscire dal fotogramma
-    let pad_x = (w as f32 * imp.margine) as i32;
-    let pad_y = (h as f32 * imp.margine) as i32;
-    let x2 = (foto.larghezza as i32).min(x + w + pad_x);
-    let y2 = (foto.altezza as i32).min(y + h + pad_y);
-    let x = 0.max(x - pad_x);
-    let y = 0.max(y - pad_y);
-
-    Some((Riquadro { x, y, w: x2 - x, h: y2 - y }, sicurezza))
+/// Dove sta di solito il display in un video: la posizione "di mezzo"
+/// (mediana) dei riquadri trovati. Un lampione che passa per qualche
+/// secondo non la sposta. None se i riquadri sono meno di 3.
+pub fn posizione_abituale(riquadri: &[Riquadro]) -> Option<Riquadro> {
+    if riquadri.len() < 3 {
+        return None;
+    }
+    // il valore di mezzo di una lista di numeri
+    fn di_mezzo(mut valori: Vec<i32>) -> i32 {
+        valori.sort();
+        valori[valori.len() / 2]
+    }
+    let centri_x: Vec<i32> = riquadri.iter().map(|r| r.x + r.w / 2).collect();
+    let centri_y: Vec<i32> = riquadri.iter().map(|r| r.y + r.h / 2).collect();
+    let larghezze: Vec<i32> = riquadri.iter().map(|r| r.w).collect();
+    let altezze: Vec<i32> = riquadri.iter().map(|r| r.h).collect();
+    let w = di_mezzo(larghezze);
+    let h = di_mezzo(altezze);
+    Some(Riquadro { x: di_mezzo(centri_x) - w / 2, y: di_mezzo(centri_y) - h / 2, w, h })
 }
 
 // ==========================================

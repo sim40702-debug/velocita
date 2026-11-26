@@ -8,7 +8,10 @@
 // dove il programma, prima, sbagliava zona (lampioni, muri, strada
 // illuminata, strisce della moto, riflessi...).
 
-use motore::rilevamento::{momento_usato, trova_display, ColoreDisplay, Impostazioni, Inseguitore, Momento, Riquadro};
+use motore::rilevamento::{
+    momento_usato, posizione_abituale, scegli_display, trova_candidati, trova_display, Candidato, ColoreDisplay,
+    Impostazioni, Inseguitore, Momento, Riquadro,
+};
 use motore::video::apri_immagine;
 use std::path::Path;
 
@@ -393,3 +396,115 @@ fn le_facce_si_cercano_in_parallelo_senza_bloccarsi() {
     let risultati: Vec<_> = gruppo.install(|| tanti.par_iter().map(motore::volti::trova_volti).collect());
     assert_eq!(risultati.len(), 16);
 }
+
+// ==========================================
+// LAMPIONE AL POSTO DEL CONTAGIRI
+// ==========================================
+
+/// Disegna un "lampione" arancione molto luminoso (un rettangolo pieno)
+/// nella metà bassa del fotogramma, lontano dal display.
+fn con_lampione(nome: &str, x: usize, y: usize, w: usize, h: usize) -> motore::rilevamento::Fotogramma {
+    let mut foto = apri(nome);
+    for yy in y..y + h {
+        for xx in x..x + w {
+            let i = (yy * foto.larghezza + xx) * 3;
+            foto.dati[i] = 255; // rosso
+            foto.dati[i + 1] = 140; // verde: arancione acceso come i lampioni al sodio
+            foto.dati[i + 2] = 0; // blu
+        }
+    }
+    foto
+}
+
+/// Il centro del riquadro è dentro il display giusto?
+fn sul_display(r: Riquadro, x: i32, y: i32, w: i32, h: i32) -> bool {
+    let centro_x = r.x + r.w / 2;
+    let centro_y = r.y + r.h / 2;
+    centro_x >= x && centro_x <= x + w && centro_y >= y && centro_y <= y + h
+}
+
+#[test]
+fn con_la_posizione_abituale_il_lampione_non_ruba_il_display() {
+    let (nome, x, y, w, h) = DISPLAY_GIUSTI[0];
+    let foto = apri(nome);
+    // un lampione molto più luminoso del display, a sinistra in basso
+    let lampione = con_lampione(nome, 40, foto.altezza * 4 / 5, 240, 110);
+
+    // senza sapere dove sta di solito, vince il lampione (è quello che succedeva)
+    let senza = trova_display(&lampione, &Impostazioni::default()).expect("trova qualcosa");
+    assert!(!sul_display(senza, x, y, w, h), "il lampione di prova è troppo debole: {senza:?}");
+
+    // la posizione abituale: dove lo trova nel fotogramma senza lampione
+    let casa = trova_display(&foto, &Impostazioni::default()).expect("display nel fotogramma pulito");
+    let imp = Impostazioni { casa: Some(casa), ..Impostazioni::default() };
+    let con = trova_display(&lampione, &imp).expect("trova il display");
+    assert!(sul_display(con, x, y, w, h), "con la posizione abituale ha scelto {con:?}");
+}
+
+#[test]
+fn con_la_posizione_abituale_i_fotogrammi_veri_restano_giusti() {
+    for (nome, x, y, w, h) in DISPLAY_GIUSTI {
+        let foto = apri(nome);
+        let casa = Riquadro { x, y, w, h };
+        let imp = Impostazioni { casa: Some(casa), ..Impostazioni::default() };
+        let r = trova_display(&foto, &imp).expect("display trovato");
+        assert!(sul_display(r, x, y, w, h), "{nome}: trovato {r:?}");
+    }
+}
+
+#[test]
+fn la_posizione_abituale_ignora_i_lampioni_di_passaggio() {
+    let display = Riquadro { x: 500, y: 800, w: 160, h: 80 };
+    let lampione = Riquadro { x: 1500, y: 700, w: 120, h: 100 };
+    // 7 volte il display (che si muove un pochino) e 3 volte un lampione
+    let mut riquadri = Vec::new();
+    for i in 0..7 {
+        riquadri.push(Riquadro { x: display.x + i * 2, ..display });
+    }
+    for _ in 0..3 {
+        riquadri.push(lampione);
+    }
+    let casa = posizione_abituale(&riquadri).expect("posizione trovata");
+    assert!(sul_display(casa, display.x, display.y, display.w + 20, display.h), "casa {casa:?}");
+
+    // con meno di 3 riquadri non si sa
+    assert_eq!(posizione_abituale(&riquadri[..2]), None);
+}
+
+#[test]
+fn lontano_dalla_posizione_abituale_diventa_arancione() {
+    let casa = Riquadro { x: 500, y: 800, w: 160, h: 80 };
+    let lampione = Candidato { riquadro: Riquadro { x: 1500, y: 700, w: 120, h: 100 }, punteggio: 900.0 };
+    let display = Candidato { riquadro: casa, punteggio: 300.0 };
+
+    // ci sono tutti e due: vince il display, ed è sicuro
+    let (r, sicurezza) = scegli_display(&[lampione, display], Some(casa)).unwrap();
+    assert_eq!(r, casa);
+    assert!(sicurezza >= 0.5);
+
+    // c'è solo il lampione: lo copre, ma con sicurezza 0 (arancione)
+    let (r, sicurezza) = scegli_display(&[lampione], Some(casa)).unwrap();
+    assert_eq!(r, lampione.riquadro);
+    assert_eq!(sicurezza, 0.0);
+
+    // senza posizione abituale: come prima, vince il più luminoso
+    let (r, _) = scegli_display(&[lampione, display], None).unwrap();
+    assert_eq!(r, lampione.riquadro);
+
+    // anche se il lampione è 50 volte più luminoso, vince quello alla casa
+    let debole = Candidato { riquadro: casa, punteggio: 18.0 };
+    let (r, _) = scegli_display(&[lampione, debole], Some(casa)).unwrap();
+    assert_eq!(r, casa);
+}
+
+#[test]
+fn i_candidati_sono_in_ordine_e_al_massimo_quattro() {
+    for (nome, ..) in DISPLAY_GIUSTI {
+        let candidati = trova_candidati(&apri(nome), &Impostazioni::default());
+        assert!(!candidati.is_empty() && candidati.len() <= 4, "{nome}: {}", candidati.len());
+        for coppia in candidati.windows(2) {
+            assert!(coppia[0].punteggio >= coppia[1].punteggio, "{nome}: non in ordine");
+        }
+    }
+}
+

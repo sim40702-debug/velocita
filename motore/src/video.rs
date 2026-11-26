@@ -12,8 +12,8 @@ use std::thread;
 use rayon::prelude::*;
 
 use crate::rilevamento::{
-    copri, copri_grezzo, copri_zona, copri_zona_grezzo, momento_usato, regione_centrale, trova_display,
-    trova_display_con_sicurezza, vicini, zona_da_coprire, zona_fissa_a, Fotogramma, Impostazioni, Inseguitore, Momento,
+    copri, copri_grezzo, copri_zona, copri_zona_grezzo, momento_usato, posizione_abituale, regione_centrale,
+    scegli_display, trova_candidati, trova_display, vicini, Candidato, zona_da_coprire, zona_fissa_a, Fotogramma, Impostazioni, Inseguitore, Momento,
     Riquadro, ZonaFissa,
 };
 use crate::segui::Oggetto;
@@ -1018,6 +1018,7 @@ pub const SICUREZZA_MINIMA: f32 = 0.3;
 /// se il display viene trovato. Per essere veloce legge solo i fotogrammi
 /// chiave, quelli che ffmpeg decodifica subito.
 /// avanzamento(stati finora, punti totali) viene chiamato mentre lavora.
+/// Ritorna gli stati e dove sta di solito il display (None se non si sa).
 pub fn analizza_copertura(
     ffmpeg: &Path,
     percorso: &Path,
@@ -1025,7 +1026,7 @@ pub fn analizza_copertura(
     worker: usize,
     annulla: &AtomicBool,
     mut avanzamento: impl FnMut(&[u8], usize),
-) -> Result<Vec<u8>, String> {
+) -> Result<(Vec<u8>, Option<Riquadro>), String> {
     let info = leggi_info(ffmpeg, percorso)?;
     let totali = ((info.durata * PUNTI_AL_SECONDO).ceil() as usize).max(1);
     let dimensione = info.larghezza * info.altezza * 3;
@@ -1048,9 +1049,10 @@ pub fn analizza_copertura(
         .map_err(|e| format!("Non riesco ad avviare ffmpeg: {e}"))?;
     let mut entrata = lettore.stdout.take().unwrap();
 
-    // (riquadro, sicurezza) di ogni punto
-    let mut trovati: Vec<Option<(Riquadro, f32)>> = Vec::new();
+    // le zone che potrebbero essere il display, per ogni punto
+    let mut candidati: Vec<Vec<Candidato>> = Vec::new();
     let mut stati: Vec<u8> = Vec::new();
+    let mut casa: Option<Riquadro> = None;
     let per_gruppo = (worker * 2).max(4);
 
     loop {
@@ -1078,31 +1080,36 @@ pub fn analizza_copertura(
         for i in 1..gruppo.len() {
             uguale_al_precedente[i] = gruppo[i].dati == gruppo[i - 1].dati;
         }
-        let risultati: Vec<Option<(Riquadro, f32)>> = gruppo_core.install(|| {
+        let risultati: Vec<Vec<Candidato>> = gruppo_core.install(|| {
             gruppo
                 .par_iter()
                 .enumerate()
-                .map(|(i, f)| if uguale_al_precedente[i] { None } else { trova_display_con_sicurezza(f, imp) })
+                .map(|(i, f)| if uguale_al_precedente[i] { Vec::new() } else { trova_candidati(f, imp) })
                 .collect()
         });
         for (i, r) in risultati.into_iter().enumerate() {
-            if uguale_al_precedente[i] {
-                let precedente = *trovati.last().unwrap();
-                trovati.push(precedente);
+            if uguale_al_precedente[i] && !candidati.is_empty() {
+                let precedenti = candidati.last().unwrap().clone();
+                candidati.push(precedenti);
             } else {
-                trovati.push(r);
+                candidati.push(r);
             }
         }
 
+        // dove sta di solito il display (con quello che si è visto finora),
+        // poi in ogni punto si sceglie la zona lì
+        let migliori: Vec<Riquadro> = candidati.iter().filter_map(|c| c.first()).map(|c| c.riquadro).collect();
+        casa = posizione_abituale(&migliori);
+        let trovati: Vec<Option<(Riquadro, f32)>> = candidati.iter().map(|c| scegli_display(c, casa)).collect();
         stati = stati_copertura(&trovati);
         avanzamento(&stati, totali.max(stati.len()));
     }
     let _ = lettore.wait();
 
-    if trovati.is_empty() {
+    if candidati.is_empty() {
         return Err("Non riesco a leggere il video per l'analisi.".to_string());
     }
-    Ok(stati)
+    Ok((stati, casa))
 }
 
 /// Da (riquadro, sicurezza) a verde / arancione / rosso.

@@ -96,7 +96,8 @@ jobs:
           node -e "const fs=require('fs');const f='src-tauri/tauri.conf.json';const c=JSON.parse(fs.readFileSync(f));c.version='$VERSIONE';fs.writeFileSync(f,JSON.stringify(c,null,2));"
           # la descrizione della release: note-release/<tag>.md (con le immagini),
           # se non c'è l'elenco dei commit (serve la storia completa e i tag)
-          git fetch --quiet --tags --unshallow origin || git fetch --quiet --tags origin
+          # --force serve: il tag scaricato da checkout è diverso da quello su GitHub
+          git fetch --force --tags --unshallow origin || git fetch --force --tags origin
           {
             echo "NOTE<<FINE_NOTE"
             node scripts/note_release.mjs "${GITHUB_REF_NAME}"

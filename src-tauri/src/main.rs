@@ -24,6 +24,10 @@ static ANNULLA: AtomicBool = AtomicBool::new(false);
 // l'analisi per la striscia colorata in corso (per poterla fermare)
 static ANALISI_IN_CORSO: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
 
+// dove sta di solito il display in ogni video (lo trova l'analisi):
+// (percorso del video, scelte del display, posizione)
+static CASE: Mutex<Vec<(String, String, Riquadro)>> = Mutex::new(Vec::new());
+
 // ==========================================
 // FFMPEG INCLUSO NELL'APP
 // ==========================================
@@ -107,7 +111,41 @@ fn impostazioni(forza: u32, margine: f32, debug: bool, display: &SceltaDisplay) 
             Some(r) => Regolazione { dx: r.dx, dy: r.dy, larghezza: r.larghezza, altezza: r.altezza },
             None => Regolazione::nessuna(),
         },
+        casa: None,
     }
+}
+
+// ==========================================
+// DOVE STA DI SOLITO IL DISPLAY
+// ==========================================
+
+/// Le scelte che cambiano dove viene trovato il display (colore, posizione,
+/// giorno/notte): se cambiano, la posizione abituale va ricalcolata.
+fn chiave_display(display: &SceltaDisplay) -> String {
+    format!("{} {} {:?} {}", display.colore, display.posizione, display.rgb, display.momento)
+}
+
+/// Si segna dove sta di solito il display in questo video.
+fn salva_casa(percorso: &str, display: &SceltaDisplay, casa: Option<Riquadro>) {
+    if let Ok(mut case) = CASE.lock() {
+        // toglie quella vecchia di questo video
+        case.retain(|(p, _, _)| p != percorso);
+        if let Some(casa) = casa {
+            case.push((percorso.to_string(), chiave_display(display), casa));
+        }
+    }
+}
+
+/// Dove sta di solito il display in questo video (None = non si sa ancora).
+fn casa_di(percorso: &str, display: &SceltaDisplay) -> Option<Riquadro> {
+    let chiave = chiave_display(display);
+    let case = CASE.lock().ok()?;
+    for (p, k, casa) in case.iter() {
+        if p == percorso && *k == chiave {
+            return Some(*casa);
+        }
+    }
+    None
 }
 
 // ==========================================
@@ -193,7 +231,8 @@ async fn anteprima_animata(
     fisse: Option<Vec<ZonaFissaFinestra>>,
 ) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let imp = impostazioni(forza, margine, false, &display);
+        let mut imp = impostazioni(forza, margine, false, &display);
+        imp.casa = casa_di(&percorso, &display);
         let zone = zone_fisse(fisse);
         let fotogrammi = video::anteprima_animata(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp, &zone)?;
         let mut immagini = Vec::new();
@@ -297,7 +336,8 @@ async fn anteprima(
     fisse: Option<Vec<ZonaFissaFinestra>>,
 ) -> Result<RispostaAnteprima, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let imp = impostazioni(forza, margine, false, &display);
+        let mut imp = impostazioni(forza, margine, false, &display);
+        imp.casa = casa_di(&percorso, &display);
         let zone = zone_fisse(fisse);
         let a = video::anteprima(&percorso_ffmpeg(), Path::new(&percorso), posizione, &imp, &zone)?;
         let (larghezza, altezza) = (a.foto.larghezza, a.foto.altezza);
@@ -386,7 +426,8 @@ async fn analizza(app: AppHandle, percorso: String, display: SceltaDisplay) -> R
             },
         );
         match risultato {
-            Ok(stati) => {
+            Ok((stati, casa)) => {
+                salva_casa(&percorso, &display, casa);
                 let totali = stati.len();
                 let _ = app.emit("copertura", Copertura { percorso: percorso.clone(), stati, totali, finito: true });
                 Ok(())
@@ -523,7 +564,8 @@ async fn elabora(
             _ => entrata.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
         };
         let uscita = nome_uscita(&entrata, &cartella_uscita);
-        let imp = impostazioni(forza, margine, debug, &display);
+        let mut imp = impostazioni(forza, margine, debug, &display);
+        imp.casa = casa_di(&percorso, &display);
         let zone = zone_fisse(fisse);
         let inizio = Instant::now();
         // il computer resta sveglio finché questa funzione non finisce
@@ -545,6 +587,18 @@ async fn elabora(
         }
 
         let worker = video::calcola_numero_worker(uso_cpu, video::cpu_totali());
+
+        // video mai analizzato: prima un controllo veloce per sapere
+        // dove sta di solito il display (così un lampione non lo "ruba")
+        if imp.casa.is_none() {
+            if let Ok((_stati, casa)) =
+                video::analizza_copertura(&percorso_ffmpeg(), &entrata, &imp, worker, &ANNULLA, |_, _| {})
+            {
+                salva_casa(&percorso, &display, casa);
+                imp.casa = casa;
+            }
+        }
+
         let mut ultimo_invio = Instant::now();
         let esito = video::elabora_video(
             &percorso_ffmpeg(),
